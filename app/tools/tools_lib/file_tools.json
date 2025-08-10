@@ -1,0 +1,173 @@
+[
+  {
+    "type": "function",
+    "function": {
+      "name": "file.save",
+      "description": "Saves or overwrites a text file with specified content to a relative path in the workspace.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "Relative path of the file, e.g., 'my_notes.txt' or 'project/docs/api.md'."
+          },
+          "content": {
+            "type": "string",
+            "description": "The full text content to save in the file."
+          }
+        },
+        "required": [
+          "path",
+          "content"
+        ]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "file.read",
+      "description": "Reads and returns the full text content of a specified file from a relative path in the workspace.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "The relative path of the file to read."
+          }
+        },
+        "required": [
+          "path"
+        ]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "file.list",
+      "description": "Returns a list of all files in a specified directory.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "The relative path of the directory to list. Defaults to the workspace root '.'",
+            "default": "."
+          }
+        }
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "file.append",
+      "description": "Adds content to the end of a file at a relative path, creating it if it doesn't exist.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "The relative path of the file to append to."
+          },
+          "content": {
+            "type": "string",
+            "description": "The text to add."
+          }
+        },
+        "required": [
+          "path",
+          "content"
+        ]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "file.delete",
+      "description": "Permanently deletes a specified file at a relative path.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "The relative path of the file to delete."
+          }
+        },
+        "required": [
+          "path"
+        ]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "file.find",
+      "description": "Recursively searches for files in the secure directory by a name pattern (e.g., '*.py') and/or by text content using a regular expression.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "name_pattern": {
+            "type": "string",
+            "description": "A shell wildcard pattern to match filenames, like '*.txt' or 'project_*.*'."
+          },
+          "content_regex": {
+            "type": "string",
+            "description": "A regular expression to search for within file contents, like 'API_KEY' or '^import'."
+          }
+        }
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "file.compare",
+      "description": "Compares the contents of two text files and shows the differences in a 'diff' format. Useful for tracking changes.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "file1": {
+            "type": "string",
+            "description": "The relative path of the first file for comparison."
+          },
+          "file2": {
+            "type": "string",
+            "description": "The relative path of the second file for comparison."
+          }
+        },
+        "required": [
+          "file1",
+          "file2"
+        ]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "fs.move",
+      "description": "Moves or renames a file or directory within the workspace.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "source": {
+            "type": "string",
+            "description": "The source path of the item to move."
+          },
+          "destination": {
+            "type": "string",
+            "description": "The destination path."
+          }
+        },
+        "required": [
+          "source",
+          "destination"
+        ]
+      }
+    }
+  }
+]

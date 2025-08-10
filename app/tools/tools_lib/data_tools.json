@@ -1,0 +1,77 @@
+[
+  {
+    "type": "function",
+    "function": {
+      "name": "data.get_csv_info",
+      "description": "Analyzes a CSV file to understand its contents. Returns the columns, data types, and the first few rows.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "filename": {
+            "type": "string",
+            "description": "The name of the CSV file in the secure directory."
+          }
+        },
+        "required": [
+          "filename"
+        ]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "data.create_plot_from_csv",
+      "description": "The **primary and most direct** tool for generating a plot (line, bar, scatter) from a CSV file. It automatically handles data columns and headers. **This is the best tool for any request that asks to 'plot this file' or 'create a graph from a CSV'.**",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "filename": {
+            "type": "string",
+            "description": "The path to the CSV file to be plotted."
+          },
+          "plot_type": {
+            "type": "string",
+            "enum": [
+              "line",
+              "bar",
+              "scatter"
+            ],
+            "description": "Optional: The type of plot to generate. Defaults to 'line'."
+          },
+          "title": {
+            "type": "string",
+            "description": "Optional: A custom title for the plot."
+          }
+        },
+        "required": [
+          "filename"
+        ]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "data.query_json",
+      "description": "Loads a JSON file and extracts specific data using a JMESPath query expression. A cheat sheet for JMESPath can be found at jmespath.org.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "filename": {
+            "type": "string",
+            "description": "The name of the JSON file to query."
+          },
+          "query": {
+            "type": "string",
+            "description": "The JMESPath query to execute (e.g., 'key.nested_key[0]')."
+          }
+        },
+        "required": [
+          "filename",
+          "query"
+        ]
+      }
+    }
+  }
+]

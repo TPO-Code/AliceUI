@@ -1,0 +1,36 @@
+[
+  {
+    "type": "function",
+    "function": {
+      "name": "system.get_status",
+      "description": "Provides a snapshot of the server's current status, including uptime, CPU usage, memory (RAM) usage, disk space, and NVIDIA GPU statistics (if available).",
+      "parameters": {
+        "type": "object",
+        "properties": {}
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "system.execute_command",
+      "description": "Executes a non-interactive shell command with a timeout from a secure directory. Useful for git, listing files, or running simple scripts. Returns the command's stdout and stderr.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "command": {
+            "type": "string",
+            "description": "The shell command to be executed, e.g., 'ls -l' or 'python --version'."
+          },
+          "timeout": {
+            "type": "integer",
+            "description": "Optional timeout in seconds. Defaults to 60."
+          }
+        },
+        "required": [
+          "command"
+        ]
+      }
+    }
+  }
+]

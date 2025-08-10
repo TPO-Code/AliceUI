@@ -1,0 +1,50 @@
+[
+  {
+    "type": "function",
+    "function": {
+      "name": "research.github_repos",
+      "description": "Finds multiple GitHub repositories, saves them to the blackboard, and initiates the processing plan. Use this to start any multi-repo analysis.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "The search query for repositories, e.g., 'LLM agent framework'."
+          },
+          "num_results": {
+            "type": "integer",
+            "description": "Number of results to find. Defaults to 3.",
+            "default": 3
+          }
+        },
+        "required": [
+          "query"
+        ]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "research.web_summarize",
+      "description": "Finds multiple web pages, saves them, and kicks off a plan to summarize them. Use this to compare items from across the web.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "The web search query, e.g., 'best wireless headphones 2024'."
+          },
+          "num_results": {
+            "type": "integer",
+            "description": "Number of web pages to analyze. Defaults to 3.",
+            "default": 3
+          }
+        },
+        "required": [
+          "query"
+        ]
+      }
+    }
+  }
+]

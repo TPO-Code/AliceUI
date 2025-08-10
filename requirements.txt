@@ -1,0 +1,9 @@
+# Core project dependencies
+
+Pyside6
+requests
+numpy
+platformdirs
+markdown
+pygments
+pymdown-extensions

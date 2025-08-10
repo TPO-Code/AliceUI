@@ -1,0 +1,149 @@
+[
+  {
+    "type": "function",
+    "function": {
+      "name": "calendar.create_event",
+      "description": "bOOMABPOP Creates a new event or alarm in the calendar. Use this to create appointments and reminders for the user",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": "string",
+            "description": "The main title or name of the event. For example, 'Team Meeting' or 'Dentist Appointment'."
+          },
+          "start_time": {
+            "type": "string",
+            "description": "The start date and time of the event in ISO 8601 format (e.g., '2024-10-26T10:00:00-07:00')."
+          },
+          "end_time": {
+            "type": "string",
+            "description": "The end date and time of the event in ISO 8601 format (e.g., '2024-10-26T11:00:00-07:00')."
+          },
+          "description": {
+            "type": "string",
+            "description": "--- A detailed description providing additional context about the event.-- \n- Use this for information that doesn't fit in the title, such as an agenda, preparation notes, contact information, or relevant links (e.g., a link to a document). \n- ONLY include this argument if the user explicitly provides these extra details. \n- Do NOT invent a description or repeat the title here.\n If the user only provides a title and time, omit this argument"
+          },
+          "event_type": {
+            "type": "string",
+            "enum": [
+              "event",
+              "alarm"
+            ],
+            "description": "--- OPTIONS ARE ---\n- alarm -- used for short term reminders and alarms such as, remind me to feed the cat at 8AM or set a 10 minuet reminder\n- event -- used for future events and engagements such ad doctors appointments, bill payment, parties, social events, deadlines etc"
+          }
+        },
+        "required": [
+          "title",
+          "start_time",
+          "end_time",
+          "event_type"
+        ]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "calendar.find_events_by_time_range",
+      "description": "Finds all calendar events within a specified time range. Use this to answer questions about the user's schedule, such as 'What's on my calendar today?', 'Am I free tomorrow afternoon?', or 'What do I have planned for next week?'. The model must calculate the precise start_time and end_time in ISO 8601 format based on the user's request and the current time.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "start_time": {
+            "type": "string",
+            "description": "The inclusive start date and time for the search range, in ISO 8601 format. When a user is vague (e.g., 'tomorrow'), infer the logical start of that period. For 'tomorrow', use the start of the next day (00:00:00). For 'this afternoon', use 12:00 PM of the current day. For 'next week', use the start of the upcoming Monday."
+          },
+          "end_time": {
+            "type": "string",
+            "description": "The inclusive end date and time for the search range, in ISO 8601 format. This should logically conclude the period defined by the start_time and the user's query. For 'tomorrow', use the end of that day (23:59:59). For 'this afternoon', use the end of the workday (e.g., 18:00:00). For 'next week', use the end of the following Sunday."
+          }
+        },
+        "required": [
+          "start_time",
+          "end_time"
+        ]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "calendar.search_events_by_keyword",
+      "description": "Searches for events by a keyword in the title or description.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "keyword": {
+            "type": "string",
+            "description": "The keyword to search for."
+          }
+        },
+        "required": [
+          "keyword"
+        ]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "calendar.edit_event",
+      "description": "Updates an existing event using its ID. Only provide the fields you want to change.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "event_id": {
+            "type": "integer",
+            "description": "The unique ID of the event to update."
+          },
+          "title": {
+            "type": "string",
+            "description": "The new title."
+          },
+          "start_time": {
+            "type": "string",
+            "description": "The new start time (ISO 8601)."
+          },
+          "end_time": {
+            "type": "string",
+            "description": "The new end time (ISO 8601)."
+          },
+          "description": {
+            "type": "string",
+            "description": "The new description."
+          },
+          "event_type": {
+            "type": "string",
+            "enum": [
+              "event",
+              "alarm"
+            ],
+            "description": "The new type."
+          }
+        },
+        "required": [
+          "event_id"
+        ]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "calendar.remove_event",
+      "description": "Deletes an event from the calendar using its unique ID.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "event_id": {
+            "type": "integer",
+            "description": "The ID of the event to delete."
+          }
+        },
+        "required": [
+          "event_id"
+        ]
+      }
+    }
+  }
+]

@@ -1,0 +1,15 @@
+{
+    "Settings": {
+        "ollama": {
+            "url": "http://localhost:11434"
+        }
+    },
+    "messages": [],
+    "setting": {
+        "theme": {
+            "main_color": "#202020",
+            "highlight_color": "#202020",
+            "input_field_color": "#252525"
+        }
+    }
+}

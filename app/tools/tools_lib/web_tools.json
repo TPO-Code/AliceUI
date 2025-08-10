@@ -1,0 +1,44 @@
+[
+  {
+    "type": "function",
+    "function": {
+      "name": "web.search",
+      "description": "Performs a web search and returns a list of URLs.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "The search query."
+          }
+        },
+        "required": [
+          "query"
+        ]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "web.read",
+      "description": "Extracts the clean, readable text content from a given URL.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string",
+            "description": "The URL to extract text from."
+          },
+          "max_length": {
+            "type": "integer",
+            "description": "Optional maximum length of text to return. Defaults to 4000."
+          }
+        },
+        "required": [
+          "url"
+        ]
+      }
+    }
+  }
+]

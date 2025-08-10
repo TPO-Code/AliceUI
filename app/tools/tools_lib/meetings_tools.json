@@ -1,0 +1,13 @@
+[
+  {
+    "type": "function",
+    "function": {
+      "name": "meetings.prepare_for_next",
+      "description": "A composite tool that finds the user's next meeting for today and searches for any related files or notes to help them prepare.",
+      "parameters": {
+        "type": "object",
+        "properties": {}
+      }
+    }
+  }
+]

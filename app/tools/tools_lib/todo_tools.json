@@ -1,0 +1,51 @@
+[
+  {
+    "type": "function",
+    "function": {
+      "name": "todo.add",
+      "description": "Adds a new task or item to the user's to-do list.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "item": {
+            "type": "string",
+            "description": "The content of the task to add."
+          }
+        },
+        "required": [
+          "item"
+        ]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "todo.view",
+      "description": "Displays all the items currently in the to-do list with their corresponding numbers.",
+      "parameters": {
+        "type": "object",
+        "properties": {}
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "todo.complete",
+      "description": "Marks an item as complete and removes it from the to-do list using its number.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "item_number": {
+            "type": "integer",
+            "description": "The number of the item to remove, as shown by 'todo.view'."
+          }
+        },
+        "required": [
+          "item_number"
+        ]
+      }
+    }
+  }
+]

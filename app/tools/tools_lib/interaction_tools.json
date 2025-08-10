@@ -1,0 +1,28 @@
+[
+  {
+    "type": "function",
+    "function": {
+      "name": "human.ask",
+      "description": "Asks the user a question to get information needed to proceed with a task or to confirm a sensitive action. Stops execution until the user replies.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "question": {
+            "type": "string",
+            "description": "The question you need to ask the user."
+          },
+          "options": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Optional: A list of specific choices to present to the user."
+          }
+        },
+        "required": [
+          "question"
+        ]
+      }
+    }
+  }
+]

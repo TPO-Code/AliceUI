@@ -1,0 +1,144 @@
+[
+  {
+    "type": "function",
+    "function": {
+      "name": "github.find_and_clone",
+      "description": "Composite: Searches GitHub for a public project and clones the most relevant result. Ideal for getting source code for a known library or tool.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "project_name": {
+            "type": "string",
+            "description": "The name of the project to search for, e.g., 'requests python'."
+          }
+        },
+        "required": [
+          "project_name"
+        ]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "github.get_overview",
+      "description": "Composite: Provides a summary of a GitHub repo (description, language, files) without cloning it. Use this to quickly inspect a project.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "owner": {
+            "type": "string",
+            "description": "The username or organization that owns the repository."
+          },
+          "repo": {
+            "type": "string",
+            "description": "The name of the repository."
+          }
+        },
+        "required": [
+          "owner",
+          "repo"
+        ]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "github.commit_and_push",
+      "description": "Composite: Stages all changes in a local repository, commits them with a message, and pushes to the specified branch. For use on your own repositories.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "repo_directory": {
+            "type": "string",
+            "description": "The name of the directory inside the file-io space that contains the repository."
+          },
+          "commit_message": {
+            "type": "string",
+            "description": "The message for the commit."
+          },
+          "branch": {
+            "type": "string",
+            "description": "The branch to push to. Defaults to 'main'."
+          }
+        },
+        "required": [
+          "repo_directory",
+          "commit_message"
+        ]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "github.search",
+      "description": "Performs a targeted search for public repositories on GitHub using a query.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "The search query, e.g., 'lang:python machine-learning'."
+          },
+          "limit": {
+            "type": "integer",
+            "description": "The maximum number of results to return. Defaults to 5."
+          }
+        },
+        "required": [
+          "query"
+        ]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "github.clone",
+      "description": "Clones a repository from a specific URL. It can perform shallow clones (--depth) and has an adjustable timeout for large repos. Automatically handles directory name conflicts.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "repo_url": {
+            "type": "string",
+            "description": "The full HTTPS URL of the repository to clone."
+          },
+          "depth": {
+            "type": "integer",
+            "description": "Optional: a number for shallow cloning (e.g., 1). Reduces download size. Defaults to a full clone."
+          },
+          "timeout": {
+            "type": "integer",
+            "description": "Optional: timeout in seconds. Defaults to 300 (5 minutes)."
+          }
+        },
+        "required": [
+          "repo_url"
+        ]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "github.list_my_repositories",
+      "description": "Fetches and lists all of the user's **remote GitHub repositories** stored in the cloud. Use this to find projects hosted on GitHub.com. For projects on the **local disk**, use `directory.tree` or `file.find` instead. Use the 'view' parameter to control the output format (full, simple, or summary), the default is simple.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "view": {
+            "type": "string",
+            "description": "The format for the output.",
+            "enum": [
+              "full",
+              "simple",
+              "summary"
+            ]
+          }
+        }
+      }
+    }
+  }
+]

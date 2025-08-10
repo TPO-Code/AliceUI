@@ -1,0 +1,38 @@
+[
+  {
+    "type": "function",
+    "function": {
+      "name": "project.create_python",
+      "description": "Composite: Scaffolds a complete, basic Python project using the `uv` toolchain. Creates a main file, gitignore, requirements, and a virtual environment with a specific Python version.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "project_name": {
+            "type": "string",
+            "description": "The name of the new project (e.g., 'data_analyzer')."
+          },
+          "python_version": {
+            "type": "string",
+            "description": "The Python version to use for the `uv` virtual environment (e.g., '3.11', '3.12'). Defaults to '3.11'.",
+            "enum": [
+              "3.10",
+              "3.11",
+              "3.12",
+              "3.13",
+              "3.14"
+            ],
+            "default": "3.11"
+          },
+          "create_venv": {
+            "type": "boolean",
+            "description": "Set to true to create a virtual environment using `uv`. Defaults to True.",
+            "default": true
+          }
+        },
+        "required": [
+          "project_name"
+        ]
+      }
+    }
+  }
+]

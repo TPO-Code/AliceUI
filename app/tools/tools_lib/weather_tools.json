@@ -1,0 +1,21 @@
+[
+  {
+    "type": "function",
+    "function": {
+      "name": "weather.get_forecast",
+      "description": "Provides the current temperature and a 3-day high/low forecast for a specified city using the Open-Meteo API.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "city": {
+            "type": "string",
+            "description": "The name of the city for the weather forecast, e.g., 'San Francisco' or 'Tokyo'."
+          }
+        },
+        "required": [
+          "city"
+        ]
+      }
+    }
+  }
+]

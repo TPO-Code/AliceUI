@@ -1,0 +1,62 @@
+[
+  {
+    "type": "function",
+    "function": {
+      "name": "directory.create",
+      "description": "Creates a new directory (folder) in the workspace.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "directory_name": {
+            "type": "string",
+            "description": "The name of the directory to create. Can be a path like 'project/new_folder'."
+          }
+        },
+        "required": [
+          "directory_name"
+        ]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "directory.delete",
+      "description": "Deletes a directory and all files and subdirectories within it. This is permanent and cannot be undone.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "directory_name": {
+            "type": "string",
+            "description": "The name of the directory to delete."
+          }
+        },
+        "required": [
+          "directory_name"
+        ]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "directory.tree",
+      "description": "Shows a tree view of all files and directories in the **local workspace on disk**. Use this to explore and find **local project folders** and their contents. For projects hosted remotely on GitHub, use `github.list_my_repositories`. Can specify a starting path and depth.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "The relative path to start listing from. Defaults to the root '.'",
+            "default": "."
+          },
+          "max_depth": {
+            "type": "integer",
+            "description": "The maximum depth to display. Use -1 for unlimited.",
+            "default": 3
+          }
+        }
+      }
+    }
+  }
+]

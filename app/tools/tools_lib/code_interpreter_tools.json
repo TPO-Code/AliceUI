@@ -1,0 +1,64 @@
+[
+  {
+    "type": "function",
+    "function": {
+      "name": "python.run_file",
+      "description": "Executes a Python file from the workspace in a secure, sandboxed environment.\n-- WHEN TO USE --\n- Use this to run python files.\n\nThe script has access to pandas, numpy, and matplotlib, but is restricted from using modules like 'os' or 'subprocess'.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "file_path": {
+            "type": "string",
+            "description": "The path of the Python file to execute, relative to the workspace. E.g., 'main.py' or 'scripts/test.py'."
+          }
+        },
+        "required": [
+          "file_path"
+        ]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "python.execute",
+      "description": "Executes a Python code string in a sandbox for complex calculations, data manipulation, or custom logic.\n-- WHEN TO USE --\n- Use this for tasks that are too complex for any other single tool.\n-- WHEN NOT TO USE --\n- **CRITICAL:** If a more specific tool exists (e.g., `data.create_plot_from_csv`), YOU MUST use that tool instead.\n\n- Do NOT use this tool for simple plotting of a CSV file.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string",
+            "description": "The Python code to execute. For example: 'df = pd.DataFrame(...); print(df.describe())'"
+          }
+        },
+        "required": [
+          "code"
+        ]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "python.run_application",
+      "description": "Runs a Python application or project from a project directory.\nIt automatically finds the entry point (main.py, app.py, etc.) and activates the project's '.venv' virtual environment to run the application in an isolated process.-- WHEN TO USE --\nUse this to start services or run complex scripts with dependencies.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "project_directory": {
+            "type": "string",
+            "description": "The relative path to the project directory in the workspace containing the application."
+          },
+          "timeout": {
+            "type": "integer",
+            "description": "Optional: Max time in seconds to wait for the command. Defaults to 120.",
+            "default": 120
+          }
+        },
+        "required": [
+          "project_directory"
+        ]
+      }
+    }
+  }
+]

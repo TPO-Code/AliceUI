@@ -1,0 +1,30 @@
+[
+  {
+    "type": "function",
+    "function": {
+      "name": "content.summarize",
+      "description": "Takes a long text (like from web.read) and returns a concise summary.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "text": {
+            "type": "string",
+            "description": "The text to summarize."
+          },
+          "length": {
+            "type": "string",
+            "enum": [
+              "sentence",
+              "paragraph",
+              "bullet_points"
+            ],
+            "description": "The desired length/format of the summary."
+          }
+        },
+        "required": [
+          "text"
+        ]
+      }
+    }
+  }
+]
