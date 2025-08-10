@@ -68,6 +68,7 @@ class BubbleMarkdownViewerWidget(QWidget):
     """
     message_rendered = Signal(str)
     geometry_changed = Signal()
+    speak_requested = Signal(str)
     def __init__(self, parent=None):
         super().__init__(parent)
         self.log=get_logger()
@@ -169,35 +170,37 @@ class BubbleMarkdownViewerWidget(QWidget):
     def _create_toolbar(self):
         """Creates the main toolbar with controls on the left and search on the right."""
         self.toolbar = QWidget()
-        # The layout is created but not yet set on the toolbar
         toolbar_layout = QHBoxLayout()
         toolbar_layout.setContentsMargins(4, 4, 4, 4)
         toolbar_layout.setSpacing(5)
 
         self.toolbar.setStyleSheet("""
-            QWidget {
-                border-bottom: 1px solid #44475a;
-                background: transparent;
-                padding: 4px; border-radius: 1px;
-            }
-            QPushButton {
-                color: #f8f8f2; border: 0px;
-                padding: 4px; border-radius: 4px;
-            }
+            QWidget { border-bottom: 1px solid #44475a; background: transparent; padding: 4px; border-radius: 1px; }
+            QPushButton { color: #f8f8f2; border: 0px; padding: 4px; border-radius: 4px; }
             QPushButton:hover { background-color: #6272a4; }
             QPushButton:pressed { background-color: #3a3d4e; }
         """)
 
         style = self.style()
 
+        # NEW: Speak/Regenerate button (hidden by default; only for assistant bubbles when TTS enabled)
+        self.speak_btn = QPushButton("🔁 Speak")
+        self.speak_btn.setFixedHeight(28)
+        self.speak_btn.setToolTip("Regenerate speech for this message")
+        self.speak_btn.setVisible(False)
+        self.speak_btn.clicked.connect(lambda: self.speak_requested.emit(self.raw_markdown_text or ""))
+
+        # Existing: Copy Markdown button
         self.copy_md_button = QPushButton()
         self.copy_md_button.setIcon(style.standardIcon(QStyle.StandardPixmap.SP_FileLinkIcon))
         self.copy_md_button.setFixedSize(30, 30)
         self.copy_md_button.setToolTip("Copy the full Markdown source to the clipboard")
         self.copy_md_button.clicked.connect(self.copy_markdown_to_clipboard)
+
+        # Layout: [Speak] …… [Copy]
+        toolbar_layout.addWidget(self.speak_btn)
         toolbar_layout.addStretch()
         toolbar_layout.addWidget(self.copy_md_button)
-
 
         self.toolbar.setLayout(toolbar_layout)
 
@@ -521,6 +524,9 @@ class BubbleMarkdownViewerWidget(QWidget):
         """
         self.web_view.setHtml(full_html, baseUrl=base_url)
 
+    def set_speak_visible(self, visible: bool):
+        self.speak_btn.setVisible(bool(visible))
+
     def clear(self):
         """Clears the content of the viewer."""
         self.setMarkdown("")
@@ -638,3 +644,4 @@ class UserChatBubbleWidget(_BubbleWidget):
 class AssistantChatBubbleWidget(_BubbleWidget):
     def __init__(self, text: str):
         super().__init__(text, is_user=False, bg_color="#283328", alias_attr="llm_text")
+        self._viewer.set_speak_visible(False)

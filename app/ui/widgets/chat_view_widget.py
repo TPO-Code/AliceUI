@@ -1,12 +1,13 @@
-from PySide6.QtCore import Qt, QTimer, QAbstractAnimation, QPropertyAnimation, QEasingCurve
+from PySide6.QtCore import Qt, QTimer, QAbstractAnimation, QPropertyAnimation, QEasingCurve, Signal
 from PySide6.QtWidgets import QVBoxLayout, QWidget, QScrollArea, QHBoxLayout, QSizePolicy
 from app.data.colors import UIColors
 from app.data.app_data import app_data
+from app.ui.widgets.AudioWaveWidget import AudioWaveWidget
 from app.ui.widgets.chat_bubble_widget import UserChatBubbleWidget, AssistantChatBubbleWidget
 
 
 class ChatViewWidget(QWidget):
-
+    speak_requested = Signal(str)
     def __init__(self):
         super().__init__()
         self._debounce = {}
@@ -41,8 +42,20 @@ class ChatViewWidget(QWidget):
         sb.valueChanged.connect(self._on_scroll_value_changed)
         sb.rangeChanged.connect(self._on_scroll_range_changed)
 
+        self._tts_enabled = False
+        self.audio_chip = AudioWaveWidget()
+        self.audio_chip.set_compact(22, show_buttons=True)
+        # colors can be themed later
+        self.audio_chip.set_colors("#8be9fd", "#1e1f29")
+        self.audio_chip.setVisible(False)
+
         main_layout = QVBoxLayout()
         main_layout.addWidget(self.scroll)
+        main_layout.addWidget(self.audio_chip)  # <--- chip sits under chat, above input (the input lives in ChatTab)
+        self.setLayout(main_layout)
+
+
+
         self.setLayout(main_layout)
 
     def _on_scroll_value_changed(self, value):
@@ -84,6 +97,12 @@ class ChatViewWidget(QWidget):
 
         container.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
         self.chat_layout.insertWidget(self.chat_layout.count() - 1, container)
+
+        if not is_user:
+            viewer = getattr(bubble, "llm_text", None)
+            if viewer:
+                viewer.set_speak_visible(self._tts_enabled)
+                viewer.speak_requested.connect(self._on_bubble_speak_clicked)
 
         # Connect both width-adjust & sticky scroll to bubble geometry changes
         viewer = getattr(bubble, "user_message", None) or getattr(bubble, "llm_text", None)
@@ -160,3 +179,23 @@ class ChatViewWidget(QWidget):
         # Stay stuck after a resize if we were at bottom
         if self._stick_to_bottom:
             QTimer.singleShot(0, self._jump_to_bottom)
+
+    def _on_bubble_speak_clicked(self, markdown_text: str):
+        # Bubble asks to (re)generate speech; let ChatTab handle TTS
+        self.speak_requested.emit(markdown_text or "")
+
+    def set_tts_enabled(self, enabled: bool):
+        self._tts_enabled = bool(enabled)
+        # Chip visibility
+        self.audio_chip.setVisible(self._tts_enabled)
+        # Toggle Speak button on existing assistant bubbles
+        for i in range(self.chat_layout.count() - 1):
+            item = self.chat_layout.itemAt(i)
+            if not item or not item.widget():
+                continue
+            container = item.widget()
+            bubble = container.findChild(AssistantChatBubbleWidget)
+            if bubble:
+                viewer = getattr(bubble, "llm_text", None)
+                if viewer:
+                    viewer.set_speak_visible(self._tts_enabled)

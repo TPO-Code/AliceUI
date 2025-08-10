@@ -74,5 +74,6 @@ class MainWindow(QMainWindow):
 
         self.options_dialog.show()
         #event.accept()
-
+        dlg.finished.connect(lambda _: self.chat_tab._apply_audio_chip_settings_from_qsettings())
+        dlg.exec()
 

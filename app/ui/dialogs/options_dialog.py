@@ -6,12 +6,296 @@ from typing import List
 import requests
 from PySide6.QtCore import QThread, Signal, Slot, Qt
 from PySide6.QtWidgets import QDialog, QHBoxLayout, QVBoxLayout, QWidget, QComboBox, QLineEdit, QTextEdit, QPushButton, \
-    QLabel
+    QLabel, QListWidgetItem, QTableWidgetItem, QMessageBox, QAbstractItemView, QHeaderView, QTableWidget, QGroupBox, \
+    QListWidget, QCheckBox
 from PySide6.QtWidgets import QTabWidget
 from PySide6.QtCore import QSettings, QByteArray
 from app.ui.widgets.AudioWaveWidget import AudioWaveWidget
+from app.core.settings_manager import SettingsManager
+from app.api.llm_api import GetRemoteModelsWorker
+class AuthTabWidget(QWidget):
+    """
+    Lets users add API providers (OpenAI, Anthropic, DeepSeek, Custom...) with keys and a list of models.
+    """
+    KNOWN_PROVIDERS = [
+        {"id": "openai", "name": "OpenAI", "base_url_hint": "", "key_hint": "sk-..."},
+        {"id": "anthropic", "name": "Anthropic", "base_url_hint": "", "key_hint": "sk-ant-..."},
+        {"id": "deepseek", "name": "DeepSeek", "base_url_hint": "https://api.deepseek.com", "key_hint": "sk-..."},
+        {"id": "custom", "name": "Custom (OpenAI-compatible)", "base_url_hint": "https://your-endpoint", "key_hint": "sk-..."},
+    ]
 
+    def __init__(self, settings: SettingsManager, parent=None):
+        super().__init__(parent)
+        self.settings = settings
+        self._providers = self.settings.get_providers()
 
+        root = QVBoxLayout(self)
+        root.setContentsMargins(8, 8, 8, 8)
+        root.setSpacing(8)
+
+        # --- Editor group ---
+        editor = QGroupBox("Add / Edit Provider")
+        eg = QVBoxLayout(editor)
+
+        row1 = QHBoxLayout()
+        self.provider_type = QComboBox()
+        for p in self.KNOWN_PROVIDERS:
+            self.provider_type.addItem(p["name"], p)
+        row1.addWidget(QLabel("Type:"))
+        row1.addWidget(self.provider_type)
+
+        self.display_name = QLineEdit()
+        self.display_name.setPlaceholderText("Display name (e.g., OpenAI, Anthropic, My Local API)")
+        row1.addWidget(QLabel("Name:"))
+        row1.addWidget(self.display_name)
+
+        eg.addLayout(row1)
+
+        row2 = QHBoxLayout()
+        self.api_key = QLineEdit()
+        self.api_key.setEchoMode(QLineEdit.Password)
+        self.api_key.setPlaceholderText("API key")
+        self.show_key = QCheckBox("Show")
+        self.show_key.toggled.connect(lambda on: self.api_key.setEchoMode(QLineEdit.Normal if on else QLineEdit.Password))
+        row2.addWidget(QLabel("API Key:"))
+        row2.addWidget(self.api_key, 1)
+        row2.addWidget(self.show_key)
+        eg.addLayout(row2)
+
+        row3 = QHBoxLayout()
+        self.base_url = QLineEdit()
+        self.base_url.setPlaceholderText("Optional base URL (needed for custom/OpenAI-compatible endpoints)")
+        row3.addWidget(QLabel("Base URL:"))
+        row3.addWidget(self.base_url, 1)
+        eg.addLayout(row3)
+
+        # Models editor
+        models_box = QGroupBox("Models exposed to Chat")
+        mb = QVBoxLayout(models_box)
+        self.model_input = QLineEdit()
+        self.model_input.setPlaceholderText("e.g., gpt-4o-mini, claude-3-5-sonnet, deepseek-chat")
+        add_model_btn = QPushButton("Add model")
+        self.models_list = QListWidget()
+        rm_model_btn = QPushButton("Remove selected")
+
+        rowm = QHBoxLayout()
+        rowm.addWidget(self.model_input, 1)
+        rowm.addWidget(add_model_btn)
+        mb.addLayout(rowm)
+        mb.addWidget(self.models_list)
+        mb.addWidget(rm_model_btn)
+        eg.addWidget(models_box)
+
+        # Buttons
+        btns = QHBoxLayout()
+        self.fetch_models_btn = QPushButton("Fetch models")  # <-- NEW
+        self.add_update_btn = QPushButton("Add/Update Provider")
+        self.clear_form_btn = QPushButton("Clear Form")
+        btns.addStretch(1)
+        btns.addWidget(self.fetch_models_btn)  # <-- NEW
+        btns.addWidget(self.add_update_btn)
+        btns.addWidget(self.clear_form_btn)
+        eg.addLayout(btns)
+
+        root.addWidget(editor)
+
+        # --- Table of providers ---
+        self.table = QTableWidget(0, 4)
+        self.table.setHorizontalHeaderLabels(["Name", "Type", "Models", "Key (masked)"])
+        self.table.horizontalHeader().setStretchLastSection(True)
+        self.table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+
+        # row actions
+        row_actions = QHBoxLayout()
+        self.edit_btn = QPushButton("Edit Selected")
+        self.delete_btn = QPushButton("Delete Selected")
+        row_actions.addStretch(1)
+        row_actions.addWidget(self.edit_btn)
+        row_actions.addWidget(self.delete_btn)
+
+        root.addWidget(self.table)
+        root.addLayout(row_actions)
+        root.addStretch(1)
+
+        # wiring
+        add_model_btn.clicked.connect(self._add_model_to_list)
+        rm_model_btn.clicked.connect(self._remove_selected_model)
+        self.add_update_btn.clicked.connect(self._add_or_update_provider)
+        self.clear_form_btn.clicked.connect(self._clear_form)
+        self.edit_btn.clicked.connect(self._edit_selected_row)
+        self.delete_btn.clicked.connect(self._delete_selected_row)
+        self.provider_type.currentIndexChanged.connect(self._apply_type_defaults)
+        self.fetch_models_btn.clicked.connect(self._fetch_models_for_current)
+
+        self._apply_type_defaults()
+        self._refresh_table()
+
+    def _apply_type_defaults(self):
+        meta = self.provider_type.currentData()
+        if not self.display_name.text().strip():
+            self.display_name.setText(meta["name"])
+        if meta.get("base_url_hint"):
+            if not self.base_url.text().strip():
+                self.base_url.setText(meta["base_url_hint"])
+        # place a gentle hint for the key format
+        self.api_key.setPlaceholderText(meta.get("key_hint", "sk-..."))
+
+    def _add_model_to_list(self):
+        m = self.model_input.text().strip()
+        if not m:
+            return
+        # Avoid duplicates
+        for i in range(self.models_list.count()):
+            if self.models_list.item(i).text() == m:
+                self.model_input.clear()
+                return
+        self.models_list.addItem(QListWidgetItem(m))
+        self.model_input.clear()
+
+    def _remove_selected_model(self):
+        for item in self.models_list.selectedItems():
+            self.models_list.takeItem(self.models_list.row(item))
+
+    def _collect_models(self):
+        return [self.models_list.item(i).text() for i in range(self.models_list.count())]
+
+    def _add_or_update_provider(self):
+        pid = self.provider_type.currentData()["id"]
+        name = self.display_name.text().strip() or self.provider_type.currentData()["name"]
+        key = self.api_key.text().strip()
+        base = self.base_url.text().strip()
+        models = self._collect_models()
+
+        if not key:
+            QMessageBox.warning(self, "Missing key", "Please enter an API key.")
+            return
+
+        # Update or insert
+        existing = next((p for p in self._providers if p["id"] == pid), None)
+        data = {"id": pid, "name": name, "api_key": key, "base_url": base, "models": models}
+        if existing:
+            existing.update(data)
+        else:
+            self._providers.append(data)
+
+        self.settings.save_providers(self._providers)
+        self._refresh_table()
+        self._clear_form()
+
+    def _clear_form(self):
+        self.display_name.clear()
+        self.api_key.clear()
+        self.base_url.clear()
+        self.model_input.clear()
+        self.models_list.clear()
+        self.provider_type.setCurrentIndex(0)
+        self._apply_type_defaults()
+
+    def _edit_selected_row(self):
+        row = self.table.currentRow()
+        if row < 0:
+            return
+        pid = self.table.item(row, 1).data(Qt.UserRole)
+        prov = next((p for p in self._providers if p["id"] == pid), None)
+        if not prov:
+            return
+        # hydrate form
+        idx = next((i for i in range(self.provider_type.count()) if self.provider_type.itemData(i)["id"] == prov["id"]), 0)
+        self.provider_type.setCurrentIndex(idx)
+        self.display_name.setText(prov.get("name", ""))
+        self.api_key.setText(prov.get("api_key", ""))
+        self.base_url.setText(prov.get("base_url", ""))
+        self.models_list.clear()
+        for m in prov.get("models", []):
+            self.models_list.addItem(QListWidgetItem(m))
+
+    def _delete_selected_row(self):
+        row = self.table.currentRow()
+        if row < 0:
+            return
+        pid = self.table.item(row, 1).data(Qt.UserRole)
+        self._providers = [p for p in self._providers if p["id"] != pid]
+        self.settings.save_providers(self._providers)
+        self._refresh_table()
+
+    def _refresh_table(self):
+        self.table.setRowCount(0)
+        for p in self._providers:
+            r = self.table.rowCount()
+            self.table.insertRow(r)
+            self.table.setItem(r, 0, QTableWidgetItem(p.get("name", p["id"])))
+            type_item = QTableWidgetItem(p["id"])
+            type_item.setData(Qt.UserRole, p["id"])
+            self.table.setItem(r, 1, type_item)
+            self.table.setItem(r, 2, QTableWidgetItem(", ".join(p.get("models", [])) or "—"))
+            masked = "•" * 8 if p.get("api_key") else ""
+            self.table.setItem(r, 3, QTableWidgetItem(masked))
+
+    def _current_form_provider(self) -> dict:
+        """Build a single-provider dict from the current form."""
+        meta = self.provider_type.currentData() or {}
+        pid = meta.get("id", "custom")
+        return {
+            "id": pid,
+            "name": self.display_name.text().strip() or meta.get("name", pid),
+            "api_key": self.api_key.text().strip(),
+            "base_url": self.base_url.text().strip(),
+            "models": self._collect_models(),
+        }
+
+    def _fetch_models_for_current(self):
+        prov = self._current_form_provider()
+        pid = (prov.get("id") or "").lower()
+
+        # quick validation
+        if not prov.get("api_key"):
+            QMessageBox.warning(self, "API key required", "Please enter an API key first.")
+            return
+        if pid == "custom" and not prov.get("base_url"):
+            QMessageBox.warning(self, "Base URL required", "Custom (OpenAI-compatible) requires a Base URL.")
+            return
+
+        self.fetch_models_btn.setEnabled(False)
+
+        # Use the worker with a single-provider list
+        self._fetch_worker = GetRemoteModelsWorker([prov])
+        self._fetch_worker.completed_llm_call.connect(self._on_fetch_models_ok)
+        self._fetch_worker.failed_llm_call.connect(self._on_fetch_models_err)
+        self._fetch_worker.start()
+
+    def _on_fetch_models_ok(self, mapping: dict):
+        """mapping: { provider_id: [model_id, ...] }"""
+        self.fetch_models_btn.setEnabled(True)
+        prov = self._current_form_provider()
+        pid = (prov.get("id") or "").lower()
+        auto = mapping.get(pid, []) or []
+
+        # Merge into the list widget (manual first, then fetched uniques)
+        before = set(self._collect_models())
+        added = 0
+        for m in auto:
+            if m and m not in before:
+                self.models_list.addItem(QListWidgetItem(m))
+                before.add(m)
+                added += 1
+
+        # If this provider already exists in saved settings, update and save
+        existing = next((p for p in self._providers if p["id"] == pid), None)
+        if existing:
+            existing["models"] = self._collect_models()
+            self.settings.save_providers(self._providers)
+            self._refresh_table()
+
+        QMessageBox.information(
+            self, "Models fetched",
+            f"Found {len(auto)} models; added {added} new to the list."
+        )
+
+    def _on_fetch_models_err(self, err: str):
+        self.fetch_models_btn.setEnabled(True)
+        QMessageBox.warning(self, "Fetch failed", f"Could not fetch models:\n\n{err}")
 class GetVoiceListWorker(QThread):
     complete = Signal(list,bool)
 
@@ -64,8 +348,13 @@ class OptionsDialog(QDialog):
 
     def __init__(self):
         super().__init__()
-        self.settings = QSettings()
-        self.audio=None
+        self.settings = SettingsManager(self)
+        self._vis_fg = None
+        self._vis_bg = None
+        self._bins_per_side = 16
+        self._bin_gap_px = 2
+        self._smoothing = 0.45
+        self._fade_decay = 0.88
         self.get_voice_list_worker = None
         self.stream_audio_worker = None
         self.main_layout=QVBoxLayout()
@@ -97,65 +386,148 @@ class OptionsDialog(QDialog):
             )
 
     def create_auth_tab(self):
-        auth_tab=QWidget()
-        self.tab_widget.addTab(auth_tab, "Authentication")
+        self.auth_tab = AuthTabWidget(self.settings, self)
+        self.tab_widget.addTab(self.auth_tab, "Auth")
 
     def create_tool_server_tab(self):
         tool_server_tab=QWidget()
         self.tab_widget.addTab(tool_server_tab, "Tool server")
 
     def create_speech_tab(self):
-        speech_tab=QWidget()
-        speech_tab_layout = QVBoxLayout()
-        speech_tab.setLayout(speech_tab_layout)
-        # server address including port
-        speech_tab_layout.addWidget( QLabel("Voice Server endpoint"))
-        self.voice_server_url = QLineEdit()
-        self.voice_server_url.setText("http://127.0.0.1:8008")
+        speech_tab = QWidget()
+        speech_tab_layout = QVBoxLayout(speech_tab)
+
+        # --- Server + voice (unchanged) ---
+        speech_tab_layout.addWidget(QLabel("Voice Server endpoint"))
+        self.voice_server_url = QLineEdit("http://127.0.0.1:8008")
         speech_tab_layout.addWidget(self.voice_server_url)
-        # voice selection
-        voice_selection_layout=QHBoxLayout()
+
+        voice_row = QHBoxLayout()
         speech_tab_layout.addWidget(QLabel("Voice"))
         self.voice_selection = QComboBox()
-        refresh_voice_list_button=QPushButton("⟳")
-        refresh_voice_list_button.setFixedWidth(40)
-        voice_selection_layout.addWidget(self.voice_selection)
-        voice_selection_layout.addWidget(refresh_voice_list_button)
-        speech_tab_layout.addLayout(voice_selection_layout)
-        # test
+        refresh_btn = QPushButton("⟳");
+        refresh_btn.setFixedWidth(40)
+        voice_row.addWidget(self.voice_selection)
+        voice_row.addWidget(refresh_btn)
+        speech_tab_layout.addLayout(voice_row)
+
+        # --- Test text + generate ---
         self.tts_test_text = QTextEdit()
-        self.test_tts_button = QPushButton("Test")
-        self.wave_player = AudioWaveWidget()
-        # Effect selector
-        effect_row = QHBoxLayout()
-        self.effect_combo = QComboBox()
-        self.effect_combo.addItems(["waveform", "spectrum", "vu"])
-        effect_row.addWidget(QLabel("Visualizer"))
-        effect_row.addWidget(self.effect_combo)
-        speech_tab_layout.addLayout(effect_row)
-
-        # Default look
-        self.wave_player.set_effect("spectrum", bar_count=64, fft_size=4096, min_db=-80, max_db=0)
-
-        # Change effect at runtime
-        def _on_effect_changed(name):
-            name = name.lower()
-            if name == "waveform":
-                self.wave_player.set_effect("waveform")
-            elif name == "spectrum":
-                self.wave_player.set_effect("spectrum", bar_count=64, fft_size=4096, min_db=-80, max_db=0)
-            elif name == "vu":
-                self.wave_player.set_effect("vu", vu_window_ms=60)
-
-        self.effect_combo.currentTextChanged.connect(_on_effect_changed)
+        self.tts_test_text.setPlaceholderText("Type something to synthesize…")
+        self.test_tts_button = QPushButton("Generate")
         speech_tab_layout.addWidget(self.tts_test_text)
         speech_tab_layout.addWidget(self.test_tts_button)
+
+        # --- New slim visualizer chip ---
+        from app.ui.widgets.AudioWaveWidget import AudioWaveWidget
+        self.wave_player = AudioWaveWidget()
+        self.wave_player.set_compact(height_px=22, show_buttons=True)
+        self.wave_player.set_colors("#8be9fd", "#1e1f29")  # will be overridden by settings
+        self.wave_player.set_effect("symmetric_bins",
+                                    bins_per_side=self._bins_per_side,
+                                    bin_gap_px=self._bin_gap_px,
+                                    smoothing=self._smoothing,
+                                    fade_decay=self._fade_decay
+                                    )
+        # Regenerate => same as Generate button
+        self.wave_player.regenerate_requested.connect(self.test_tts)
+
+        # --- Color pickers ---
+        color_row = QHBoxLayout()
+        color_row.addWidget(QLabel("Visualizer colors:"))
+        self.fg_color_btn = QPushButton("FG");
+        self.fg_color_btn.setFixedWidth(36)
+        self.bg_color_btn = QPushButton("BG");
+        self.bg_color_btn.setFixedWidth(36)
+        color_row.addWidget(self.fg_color_btn)
+        color_row.addWidget(self.bg_color_btn)
+        color_row.addStretch()
+
+        # --- Param controls (bins, gap, smoothing, fade) ---
+        from PySide6.QtWidgets import QSpinBox, QDoubleSpinBox
+        params_row = QHBoxLayout()
+        # Bins/side
+        params_row.addWidget(QLabel("Bins/side"))
+        self.bins_spin = QSpinBox();
+        self.bins_spin.setRange(4, 64);
+        self.bins_spin.setValue(self._bins_per_side)
+        params_row.addWidget(self.bins_spin)
+        # Gap
+        params_row.addWidget(QLabel("Gap(px)"))
+        self.gap_spin = QSpinBox();
+        self.gap_spin.setRange(0, 12);
+        self.gap_spin.setValue(self._bin_gap_px)
+        params_row.addWidget(self.gap_spin)
+        # Smoothing
+        params_row.addWidget(QLabel("Smoothing"))
+        self.smooth_spin = QDoubleSpinBox();
+        self.smooth_spin.setDecimals(2);
+        self.smooth_spin.setRange(0.05, 0.95)
+        self.smooth_spin.setSingleStep(0.05);
+        self.smooth_spin.setValue(self._smoothing)
+        params_row.addWidget(self.smooth_spin)
+        # Fade decay
+        params_row.addWidget(QLabel("Fade"))
+        self.fade_spin = QDoubleSpinBox();
+        self.fade_spin.setDecimals(2);
+        self.fade_spin.setRange(0.70, 0.99)
+        self.fade_spin.setSingleStep(0.01);
+        self.fade_spin.setValue(self._fade_decay)
+        params_row.addWidget(self.fade_spin)
+        params_row.addStretch()
+
+        # Add rows + player
+        speech_tab_layout.addLayout(color_row)
+        speech_tab_layout.addLayout(params_row)
         speech_tab_layout.addWidget(self.wave_player)
+
         self.tab_widget.addTab(speech_tab, "Speech")
 
-        # -- Signals --
-        refresh_voice_list_button.clicked.connect(self.refresh_voice_list)
+        # --- Signals ---
+        refresh_btn.clicked.connect(self.refresh_voice_list)
         self.test_tts_button.clicked.connect(self.test_tts)
+
+        # Color pickers
+        from PySide6.QtWidgets import QColorDialog
+        def pick_fg():
+            c = QColorDialog.getColor(parent=self)
+            if c.isValid():
+                self._vis_fg = c.name()
+                self.wave_player.set_colors(self._vis_fg, self._vis_bg or "#1e1f29")
+                self._save("speech/vis_fg", self._vis_fg)
+
+        def pick_bg():
+            c = QColorDialog.getColor(parent=self)
+            if c.isValid():
+                self._vis_bg = c.name()
+                self.wave_player.set_colors(self._vis_fg or "#8be9fd", self._vis_bg)
+                self._save("speech/vis_bg", self._vis_bg)
+
+        self.fg_color_btn.clicked.connect(pick_fg)
+        self.bg_color_btn.clicked.connect(pick_bg)
+
+        # Param changes -> apply + persist
+        def apply_params():
+            self._bins_per_side = self.bins_spin.value()
+            self._bin_gap_px = self.gap_spin.value()
+            self._smoothing = float(self.smooth_spin.value())
+            self._fade_decay = float(self.fade_spin.value())
+            self.wave_player.set_effect("symmetric_bins",
+                                        bins_per_side=self._bins_per_side,
+                                        bin_gap_px=self._bin_gap_px,
+                                        smoothing=self._smoothing,
+                                        fade_decay=self._fade_decay
+                                        )
+            # save
+            self._save("speech/bins_per_side", self._bins_per_side)
+            self._save("speech/bin_gap_px", self._bin_gap_px)
+            self._save("speech/smoothing", self._smoothing)
+            self._save("speech/fade_decay", self._fade_decay)
+
+        self.bins_spin.valueChanged.connect(lambda _: apply_params())
+        self.gap_spin.valueChanged.connect(lambda _: apply_params())
+        self.smooth_spin.valueChanged.connect(lambda _: apply_params())
+        self.fade_spin.valueChanged.connect(lambda _: apply_params())
 
     def test_tts(self):
         self.test_tts_button.setEnabled(False)
@@ -195,40 +567,65 @@ class OptionsDialog(QDialog):
             print(voice_list[0])
 
     @Slot(object)
+    @Slot(object)
     def on_audio_ready(self, wav_bytes):
-        """Parse WAV bytes -> store -> update waveform display."""
+        """Parse WAV bytes -> feed the compact AudioWaveWidget -> auto-play."""
         import io, wave, numpy as np
 
-        with wave.open(io.BytesIO(wav_bytes), 'rb') as wav:
-            sr = wav.getframerate()
-            ch = wav.getnchannels()
-            sw = wav.getsampwidth()  # bytes per sample
-            nframes = wav.getnframes()
-            raw = wav.readframes(nframes)
+        with wave.open(io.BytesIO(wav_bytes), 'rb') as w:
+            sr = w.getframerate()
+            ch = w.getnchannels()
+            sw = w.getsampwidth()  # bytes per sample
+            nframes = w.getnframes()
+            raw = w.readframes(nframes)
 
-        # Keep a normalized, minimal structure for later playback
+        # Keep a tiny record if you need it elsewhere
         self.audio = {"raw": raw, "sr": sr, "ch": ch, "sw": sw}
 
-        # Push into the visual/player widget (expects raw PCM + format)
-        # AudioWaveWidget supports raw 16-bit PCM or float32; we’ll handle 16-bit and float WAVs.
-        if sw == 2:
-            # int16
-            self.wave_player.set_wave(self.audio["raw"], sample_rate=sr, channels=ch, sample_width=2)
-        elif sw == 4:
-            # Could be float32 or 24-bit-in-32-container. Try float32 first.
-            try:
-                # Convert float32 WAV frames to float np array then let widget convert to PCM
-                arr = np.frombuffer(self.audio["raw"], dtype="<f4")
-                if ch > 1:
-                    arr = arr.reshape(-1, ch)
-                self.wave_player.set_wave(arr, sample_rate=sr, channels=ch, sample_width=4)
-            except Exception:
-                # If it wasn’t float32, fall back (or raise). Most TTS servers return 16-bit anyway.
-                raise Exception("Unsupported 32-bit WAV encoding for this player path.")
-        else:
-            raise Exception(f"Unsupported sample width: {sw} (expected 16-bit PCM or 32-bit float)")
+        try:
+            if sw == 2:
+                # 16-bit PCM: let the widget take raw bytes (little-endian)
+                self.wave_player.set_wave(raw, sample_rate=sr, channels=ch)
+            elif sw == 4:
+                # Commonly float32 WAV from TTS servers
+                # First try float32; if it explodes, fall back to int32->float path.
+                try:
+                    arr = np.frombuffer(raw, dtype="<f4")
+                    if ch > 1:
+                        arr = arr.reshape(-1, ch)
+                    # ensure safe range
+                    arr = np.clip(arr, -1.0, 1.0).astype(np.float32, copy=False)
+                except Exception:
+                    # Fallback: treat as signed int32 and normalize
+                    i32 = np.frombuffer(raw, dtype="<i4")
+                    if ch > 1:
+                        i32 = i32.reshape(-1, ch)
+                    arr = (i32.astype(np.float32) / 2147483647.0)
+                    arr = np.clip(arr, -1.0, 1.0)
 
-        print(f"WAV ready: {sr} Hz, {ch} ch, {sw} bytes/sample, frames={nframes}")
+                self.wave_player.set_wave(arr, sample_rate=sr, channels=ch)
+            else:
+                # Uncommon format (e.g., 24-bit). Convert to float32 best-effort.
+                # Interpret as signed integer with given width, normalize.
+                import numpy as np
+                dtype = {1: np.int8, 2: np.int16, 3: np.int32, 4: np.int32}.get(sw, np.int16)
+                i_arr = np.frombuffer(raw, dtype=f"<{np.dtype(dtype).str[1:]}")
+                if sw == 3:
+                    # 24-bit packed rarely lands here; treat as 32 and downscale a bit
+                    i_arr = (i_arr >> 8)
+                if ch > 1:
+                    i_arr = i_arr.reshape(-1, ch)
+                max_int = float(np.iinfo(np.int32 if sw >= 3 else dtype).max)
+                arr = np.clip(i_arr.astype(np.float32) / max_int, -1.0, 1.0)
+                self.wave_player.set_wave(arr, sample_rate=sr, channels=ch)
+
+            # fire it up
+            self.wave_player.play()
+
+        except Exception as e:
+            # Don't crash the dialog; surface in logs or a debug print
+            print(f"[on_audio_ready] Unsupported WAV format (sw={sw}) or parse error: {e}")
+
 
     # -------- settings helpers --------
     def _save(self, key: str, value):
@@ -247,45 +644,57 @@ class OptionsDialog(QDialog):
         if not geo.isEmpty():
             self.restoreGeometry(geo)
 
-        # ----- Speech tab -----
+        # Server URL
         url = self._get("speech/voice_server_url", "http://127.0.0.1:8008", str)
         self.voice_server_url.setText(url)
 
-        # Effect (default to spectrum)
-        effect = (self._get("speech/effect", "spectrum", str) or "spectrum").lower()
-        if hasattr(self, "effect_combo"):
-            # Set combobox if present
-            ix = self.effect_combo.findText(effect, Qt.MatchFlag.MatchFixedString | Qt.MatchFlag.MatchCaseSensitive)
-            if ix >= 0:
-                self.effect_combo.setCurrentIndex(ix)
-            # Apply to player
-            if effect == "waveform":
-                self.wave_player.set_effect("waveform")
-            elif effect == "vu":
-                self.wave_player.set_effect("vu", vu_window_ms=60)
-            else:
-                self.wave_player.set_effect("spectrum", bar_count=64, fft_size=4096, min_db=-80, max_db=0)
+        # Colors
+        self._vis_fg = self._get("speech/vis_fg", "#8be9fd", str)
+        self._vis_bg = self._get("speech/vis_bg", "#1e1f29", str)
+        if hasattr(self, "wave_player"):
+            self.wave_player.set_colors(self._vis_fg, self._vis_bg)
 
-        # Voice (apply after you’ve loaded the list)
-        # We’ll stash the desired voice and apply it in got_voice_list()
+        # Params
+        self._bins_per_side = int(self._get("speech/bins_per_side", 16, int))
+        self._bin_gap_px = int(self._get("speech/bin_gap_px", 2, int))
+        self._smoothing = float(self._get("speech/smoothing", 0.45, float))
+        self._fade_decay = float(self._get("speech/fade_decay", 0.88, float))
+
+        if hasattr(self, "bins_spin"):
+            self.bins_spin.setValue(self._bins_per_side)
+            self.gap_spin.setValue(self._bin_gap_px)
+            self.smooth_spin.setValue(self._smoothing)
+            self.fade_spin.setValue(self._fade_decay)
+
+        if hasattr(self, "wave_player"):
+            self.wave_player.set_effect("symmetric_bins",
+                                        bins_per_side=self._bins_per_side,
+                                        bin_gap_px=self._bin_gap_px,
+                                        smoothing=self._smoothing,
+                                        fade_decay=self._fade_decay
+                                        )
+
+        # Voice preference
         self._desired_voice = self._get("speech/voice", "", str)
 
-        # Optional: restore last test text
+        # Restore last test text
         last_text = self._get("speech/test_text", "", str)
         if last_text:
             self.tts_test_text.setPlainText(last_text)
 
     def save_settings(self):
-        # Geometry
         self._save("dialogs/options/geometry", self.saveGeometry())
-        # Speech
         self._save("speech/voice_server_url", self.voice_server_url.text())
-        if hasattr(self, "effect_combo"):
-            self._save("speech/effect", self.effect_combo.currentText().lower())
         self._save("speech/test_text", self.tts_test_text.toPlainText())
-        # Voice saved on change; but also ensure current stored on close:
         if self.voice_selection.currentIndex() >= 0:
             self._save("speech/voice", self.voice_selection.currentText())
+
+        if self._vis_fg: self._save("speech/vis_fg", self._vis_fg)
+        if self._vis_bg: self._save("speech/vis_bg", self._vis_bg)
+        self._save("speech/bins_per_side", self._bins_per_side)
+        self._save("speech/bin_gap_px", self._bin_gap_px)
+        self._save("speech/smoothing", self._smoothing)
+        self._save("speech/fade_decay", self._fade_decay)
 
     # Make sure we persist when dialog is accepted/closed
     def accept(self):
