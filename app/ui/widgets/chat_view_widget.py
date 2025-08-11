@@ -1,7 +1,7 @@
 from PySide6.QtCore import Qt, QTimer, QAbstractAnimation, QPropertyAnimation, QEasingCurve, Signal
 from PySide6.QtWidgets import QVBoxLayout, QWidget, QScrollArea, QHBoxLayout, QSizePolicy
 from app.data.colors import UIColors
-from app.data.app_data import app_data
+from app.data.app_data import storage
 from app.ui.widgets.AudioWaveWidget import AudioWaveWidget
 from app.ui.widgets.chat_bubble_widget import UserChatBubbleWidget, AssistantChatBubbleWidget
 
@@ -29,9 +29,9 @@ class ChatViewWidget(QWidget):
         self.scroll.setStyleSheet(f"""
             QScrollArea{{margin: 8px;
             border: 1px solid;
-            border-color: {app_data.get('setting.theme.highlight_color', UIColors.highlight_color)};
+            border-color: {storage.get('setting.theme.highlight_color', UIColors.highlight_color)};
             border-radius: 10px;
-            background: {app_data.get('setting.theme.input_field_color', UIColors.input_field_color)};
+            background: {storage.get('setting.theme.input_field_color', UIColors.input_field_color)};
             }}
         """)
         self.scroll.setWidgetResizable(True)

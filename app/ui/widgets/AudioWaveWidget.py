@@ -7,6 +7,7 @@ from PySide6.QtCore import Qt, QBuffer, QIODevice, QTimer, QSize, Signal
 from PySide6.QtGui import QPainter, QBrush, QColor
 from PySide6.QtWidgets import QWidget, QApplication, QHBoxLayout, QPushButton, QSizePolicy
 from PySide6.QtMultimedia import QAudioFormat
+
 try:
     from PySide6.QtMultimedia import QAudioSink, QMediaDevices
     AudioOutClass = QAudioSink
@@ -66,6 +67,13 @@ class VisualizerCanvas(QWidget):
         self._shown_lit_bins = 0.0
         self.update()
 
+    def fade_step(self, factor: float):
+        """Used during post-stop decay."""
+        self._shown_lit_bins *= float(factor)
+        if self._shown_lit_bins < 0.01:
+            self._shown_lit_bins = 0.0
+        self.update()
+
     def set_wave(self, mono: np.ndarray, sr: int, float_ch: Optional[np.ndarray] = None):
         self._mono = mono.astype(np.float32, copy=False) if mono is not None else None
         self._sr = int(sr)
@@ -75,7 +83,8 @@ class VisualizerCanvas(QWidget):
 
     def set_playhead(self, frame_index: int, playing: bool):
         self._playhead_frame = max(0, int(frame_index))
-        # compute VU (peak) over ~50ms window around playhead
+
+        # compute VU (peak) over ~50ms window behind the playhead
         if self._sr <= 0 or (self._mono is None and self._float_ch is None):
             vu = 0.0
         else:
@@ -95,7 +104,7 @@ class VisualizerCanvas(QWidget):
         max_bins = float(self._bins_per_side)
         target = vu * max_bins  # 0..bins_per_side
         if playing:
-            alpha = np.clip(self._smoothing, 0.01, 0.99)
+            alpha = float(np.clip(self._smoothing, 0.01, 0.99))
             self._shown_lit_bins = (1 - alpha) * self._shown_lit_bins + alpha * target
         else:
             self._shown_lit_bins *= self._fade_decay  # decay toward 0
@@ -112,17 +121,18 @@ class VisualizerCanvas(QWidget):
         W, H = rect.width(), rect.height()
         p.fillRect(rect, self._bg)
 
-        bins = int(np.clip(self._shown_lit_bins, 0.0, float(self._bins_per_side)))
-        if bins <= 0:  # nothing to draw
+        shown = float(np.clip(self._shown_lit_bins, 0.0, float(self._bins_per_side)))
+        bins = int(shown)
+        if shown <= 0.01 or self._bins_per_side <= 0:
             return
 
         # Geometry
         center_x = W // 2
-        available_left = center_x
-        available_right = W - center_x
-        # bin width includes gap on the "outside" side; center gap enforced via +_bin_gap_px
-        bw = max(1, int(min(available_left, available_right) / (self._bins_per_side + 1)))
+        available_left = max(1, center_x)
+        available_right = max(1, W - center_x)
         gap = self._bin_gap_px
+        # simple layout: bin width ~ equal on each side
+        bw = max(1, min(available_left, available_right) // (self._bins_per_side + 1))
 
         bar_h = max(2, int(H * 0.8))
         top = (H - bar_h) // 2
@@ -130,9 +140,7 @@ class VisualizerCanvas(QWidget):
         p.setBrush(brush)
         p.setPen(Qt.NoPen)
 
-        # draw from center outward (both sides)
-        # allow fractional bin for a soft edge: draw a partial-opacity bin for the “next” one
-        frac = self._shown_lit_bins - bins
+        # draw full bins
         for i in range(1, bins + 1):
             # left
             lx = center_x - (i * (bw + gap))
@@ -143,16 +151,15 @@ class VisualizerCanvas(QWidget):
             if rx < W:
                 p.fillRect(rx, top, bw, bar_h, brush)
 
+        # fractional soft bin
+        frac = shown - bins
         if frac > 0.01 and bins < self._bins_per_side:
-            # soft extra bin with alpha scaled by fraction
             color = QColor(self._fg)
             color.setAlpha(int(255 * np.clip(frac, 0.0, 1.0)))
             soft = QBrush(color)
-            # left fractional
             lx = center_x - ((bins + 1) * (bw + gap))
-            p.fillRect(lx, top, bw, bar_h, soft)
-            # right fractional
             rx = center_x + gap + (bins * (bw + gap))
+            p.fillRect(lx, top, bw, bar_h, soft)
             p.fillRect(rx, top, bw, bar_h, soft)
 
 
@@ -162,11 +169,10 @@ class AudioWaveWidget(QWidget):
     """
     Compact one-row audio chip:
       set_wave(...), set_effect(...), set_colors(...), set_compact(...)
-      play(), pause(), stop()
-    Signals:
-      regenerate_requested
+      play(), pause(), stop(hard=False)
     """
     regenerate_requested = Signal()
+    playing_changed = Signal(bool)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -179,6 +185,7 @@ class AudioWaveWidget(QWidget):
         self._buffer: Optional[QBuffer] = None
 
         self._paused: bool = True
+        self._playing: bool = False
         self._starting: bool = False
 
         self._timer = QTimer(self)
@@ -228,8 +235,9 @@ class AudioWaveWidget(QWidget):
         self.canvas.set_colors(fg, bg)
 
     def set_effect(self, name: str = "symmetric_bins", **params):
-        # one effect, but allow param updates
         self.canvas.set_visual_mode("symmetric_bins", **params)
+        # keep our internal fade to match canvas (for decay)
+        self._fade_decay = float(params.get("fade_decay", self._fade_decay))
 
     # ---- data ----
     def set_wave(self, data: Union[np.ndarray, bytes], sample_rate: int, channels: int = 1):
@@ -291,125 +299,156 @@ class AudioWaveWidget(QWidget):
             return
 
         self._starting = True
+        self._paused = False
+        self._playing = True
         self.play_btn.setText("❚❚")
+        self.playing_changed.emit(True)
+
+        if not self._timer.isActive():
+            self._timer.start()
 
         # async start to avoid re-entrancy
         QTimer.singleShot(0, self._start_fresh)
 
     def pause(self):
-        # Stop audio but don't trigger fade
-        self.stop(hard=False)
-        self._paused = True
-        self.play_btn.setText("▶")
-
-        # Kill any pending fade and zero the meter now
-        self._decay_ticks_remaining = 0
-        self.canvas.clear_visual()
-
-        # No need to keep ticking once we're paused & cleared
-        if self._timer.isActive():
-            self._timer.stop()
-
-    def stop(self, hard: bool = True):
-        # dispose audio cleanly
-        if self._audio is not None:
+        # stop audio but don't trigger fade; bins should drop to zero
+        if self._audio:
             try:
                 self._audio.stop()
             except Exception:
                 pass
-            try:
-                self._audio.deleteLater()
-            except Exception:
-                pass
             self._audio = None
-
-        if self._buffer is not None:
+        if self._buffer:
             try:
                 self._buffer.close()
             except Exception:
                 pass
+            self._buffer = None
+
+        self._paused = True
+        if self._playing:
+            self._playing = False
+            self.playing_changed.emit(False)
+
+        self.play_btn.setText("▶")
+        # keep timer for a moment to fade bins quickly
+        self._decay_ticks_remaining = int(self._post_decay_ms / max(1, self._timer.interval()))
+        if not self._timer.isActive():
+            self._timer.start()
+
+    def stop(self, hard: bool = False):
+        """Stop playback. If hard=True, clear immediately; else run a short decay."""
+        if self._audio:
             try:
-                self._buffer.deleteLater()
+                self._audio.stop()
+            except Exception:
+                pass
+            self._audio = None
+        if self._buffer:
+            try:
+                self._buffer.close()
             except Exception:
                 pass
             self._buffer = None
 
-        self.play_btn.setText("▶")
         self._paused = True
+        if self._playing:
+            self._playing = False
+            self.playing_changed.emit(False)
 
-        # gentle fade of the bins after end/stop
+        self.play_btn.setText("▶")
+
         if hard:
-            interval = max(16, self._timer.interval())
-            self._decay_ticks_remaining = int(self._post_decay_ms / interval)
+            self.canvas.clear_visual()
+            self._decay_ticks_remaining = 0
+            self._timer.stop()
+        else:
+            self._decay_ticks_remaining = int(self._post_decay_ms / max(1, self._timer.interval()))
             if not self._timer.isActive():
                 self._timer.start()
 
     def is_playing(self) -> bool:
-        """Public helper so other widgets can see if we're currently playing."""
-        return (self._audio is not None) and (not self._paused)
+        return bool(self._playing)
 
     # ---- internals ----
     def _start_fresh(self):
-        # build sink & buffer
-        fmt = QAudioFormat()
-        fmt.setSampleRate(self._sample_rate)
-        fmt.setChannelCount(self._channels)
-        fmt.setSampleFormat(QAudioFormat.SampleFormat.Int16)
+        try:
+            fmt = QAudioFormat()
+            fmt.setSampleRate(self._sample_rate)
+            fmt.setChannelCount(self._channels)
+            fmt.setSampleFormat(QAudioFormat.SampleFormat.Int16)
 
-        dev = QMediaDevices.defaultAudioOutput()
-        self._audio = AudioOutClass(dev, fmt) if USE_SINK else AudioOutClass(fmt, dev)
+            dev = QMediaDevices.defaultAudioOutput()
+            self._audio = AudioOutClass(dev, fmt) if USE_SINK else AudioOutClass(fmt, dev)
 
-        self._buffer = QBuffer(self)
-        self._buffer.setData(self._pcm_bytes)
-        self._buffer.open(QIODevice.ReadOnly)
-        self._buffer.seek(0)
+            self._buffer = QBuffer(self)
+            self._buffer.setData(self._pcm_bytes)
+            self._buffer.open(QIODevice.ReadOnly)
+            self._buffer.seek(0)
 
-        self._audio.start(self._buffer)
-        self._paused = False
-        if not self._timer.isActive():
-            self._timer.start()
-        self.canvas.set_playhead(0, playing=True)
-
-        self._starting = False
+            self._audio.start(self._buffer)
+            self._paused = False
+            if not self._timer.isActive():
+                self._timer.start()
+            self.canvas.set_playhead(0, playing=True)
+        finally:
+            self._starting = False
 
     # ---- ticking ----
     def _on_tick(self):
-        # handle post-stop decay
-        if (self._audio is None) and (self._decay_ticks_remaining > 0):
+        # Decay phase
+        if self._audio is None and self._decay_ticks_remaining > 0:
+            self.canvas.fade_step(self._fade_decay)
             self._decay_ticks_remaining -= 1
-            # drive canvas decay
-            self.canvas.set_playhead(self.canvas._playhead_frame, playing=False)
             if self._decay_ticks_remaining <= 0:
                 self.canvas.clear_visual()
+                self.play_btn.setText("▶")
                 self._timer.stop()
             return
 
-        # nothing to do
-        if self._audio is None or self._mono_float is None:
+        # Idle?
+        if self._audio is None or self._mono_float is None or self._paused:
             if self._decay_ticks_remaining <= 0:
                 self._timer.stop()
             return
 
-        # advance by processed microseconds
+        # --- NEW: detect natural end via buffer ---
+        if self._buffer is not None and self._buffer.atEnd() and not self._paused:
+            # ensure last visual frame, then stop -> emits playing_changed(False)
+            self.canvas.set_playhead(len(self._mono_float), playing=False)
+            self.stop(hard=False)
+            return
+
+        # Normal progress
         try:
-            u = self._audio.processedUSecs()
+            usecs = self._audio.processedUSecs()
         except Exception:
-            u = 0
-        frames = int((u / 1_000_000.0) * self._sample_rate)
+            try:
+                usecs = self._audio.elapsedUSecs()
+            except Exception:
+                usecs = 0
+
+        frames = int((usecs / 1_000_000.0) * self._sample_rate)
         total = len(self._mono_float)
-        frames = min(max(frames, 0), total)
 
-        self.canvas.set_playhead(frames, playing=not self._paused)
-
-        # finished?
         if frames >= total:
-            self.stop(hard=True)
+            self.canvas.set_playhead(total, playing=False)
+            self.stop(hard=False)
+            return
 
-    # convenience for themes (not used in chip)
-    @staticmethod
-    def _fmt_time(sec: float) -> str:
-        sec = int(round(sec)); m, s = divmod(sec, 60)
-        return f"{m:02d}:{s:02d}"
+        self.canvas.set_playhead(frames, playing=True)
+
+    def closeEvent(self, e):
+        # defensive: stop timers/audio for clean shutdown
+        try:
+            self.stop(hard=True)
+        except Exception:
+            pass
+        try:
+            self._timer.stop()
+        except Exception:
+            pass
+        super().closeEvent(e)
 
 
 if __name__ == "__main__":
@@ -417,7 +456,7 @@ if __name__ == "__main__":
     app = QApplication(sys.argv)
     w = AudioWaveWidget()
     w.resize(600, 40)
-    w.set_compact(3, show_buttons=True)
+    w.set_compact(22, show_buttons=True)
     w.set_colors("#50fa7b", "#21222C")
 
     sr = 48000

@@ -5,7 +5,7 @@ from typing import List, Dict, Any, Optional
 import requests
 from PySide6.QtCore import QThread, Signal, Slot
 
-from app.data.app_data import app_data
+from app.data.app_data import storage
 
 # =========================
 # Local: Ollama
@@ -51,7 +51,7 @@ def query_ollama(messages, model: str, options=None):
     }
 
     response = requests.post(
-        app_data.get("settings.ollama.url", "http://localhost:11434") + "/api/chat",
+        storage.get("settings.ollama.url", "http://localhost:11434") + "/api/chat",
         json=payload,
         timeout=60
     )
@@ -81,7 +81,7 @@ class GetModelListWorker(QThread):
 def get_available_models():
     try:
         response = requests.get(
-            app_data.get("settings.ollama.url", "http://localhost:11434") + "/api/tags",
+            storage.get("settings.ollama.url", "http://localhost:11434") + "/api/tags",
             timeout=15
         )
         response.raise_for_status()

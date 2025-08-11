@@ -1,20 +1,20 @@
 import json
 
 
-class _ApplicationData:
+class _EasyStorage:
     """
-    A singleton class to manage application data, allowing access
+    A singleton class to manage a json file for application data, allowing access
     to nested dictionary values using dot notation strings.
 
     Example:
-        app_data.set("settings.theme.color", "blue")
-        color = app_data.get("settings.theme.color")
+        storage.set("settings.theme.color", "blue")
+        color = storage.get("settings.theme.color")
     """
     _instance = None
 
     def __new__(cls, *args, **kwargs):
         if cls._instance is None:
-            cls._instance = super(_ApplicationData, cls).__new__(cls, *args, **kwargs)
+            cls._instance = super(_EasyStorage, cls).__new__(cls, *args, **kwargs)
             # Initialize the internal data store
             cls._instance._appdata = {
                 "Settings": {},
@@ -22,7 +22,7 @@ class _ApplicationData:
             }
         return cls._instance
 
-    def save_application_data(self, filename="appdata.json"):
+    def save(self, filename="appdata.json"):
         """Saves the current application data to a JSON file."""
         try:
             with open(filename, 'w') as f:
@@ -31,7 +31,7 @@ class _ApplicationData:
         except IOError as e:
             print(f"Error saving application data: {e}")
 
-    def load_application_data(self, filename="appdata.json"):
+    def load(self, filename="appdata.json"):
         """Loads application data from a JSON file."""
         try:
             with open(filename, 'r') as f:
@@ -43,8 +43,6 @@ class _ApplicationData:
             print(f"Error decoding JSON from {filename}. Starting with default data.")
         except IOError as e:
             print(f"Error loading application data: {e}")
-
-    # --- NEW METHODS ---
 
     def get(self, key_path, default=None):
         """
@@ -97,9 +95,8 @@ class _ApplicationData:
 
 
 
-app_data=_ApplicationData()
-app_data.load_application_data()
-#app_data.save_application_data()
+storage=_EasyStorage()
+storage.load()
 
 
 

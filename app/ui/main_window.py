@@ -2,7 +2,7 @@ from PySide6.QtCore import QEvent
 from PySide6.QtGui import QAction, QCloseEvent
 from PySide6.QtWidgets import QMainWindow, QMenu, QTabWidget
 
-from app.data.app_data import app_data
+from app.data.app_data import storage
 from app.data.colors import UIColors
 from app.ui.dialogs.options_dialog import OptionsDialog
 from app.ui.tabs.chat_tab import ChatTab
@@ -16,10 +16,10 @@ class MainWindow(QMainWindow):
 
         self.setStyleSheet(f"""
             QMainWindow{{
-            background: {app_data.get('setting.theme.main_color', UIColors.main_color)};
+            background: {storage.get('setting.theme.main_color', UIColors.main_color)};
             }}
             QTabWidget{{
-            background: {app_data.get('setting.theme.main_color', UIColors.main_color)};
+            background: {storage.get('setting.theme.main_color', UIColors.main_color)};
             }}
             """
                            )
@@ -65,7 +65,7 @@ class MainWindow(QMainWindow):
         # connections
 
     def closeEvent(self, event: QCloseEvent):
-        app_data.save_application_data()
+        storage.save()
         event.accept()
 
     def open_options(self):
