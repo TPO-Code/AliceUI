@@ -1,14 +1,24 @@
+# app/ui/tabs/chat_tab.py
+from __future__ import annotations
+
+import os
+
 from PySide6.QtCore import Qt, Slot, QTimer
-from PySide6.QtWidgets import QWidget, QVBoxLayout, QComboBox, QSplitter, QTextEdit, QHBoxLayout, QCheckBox, \
-    QMessageBox, QLabel, QPushButton
+from PySide6.QtWidgets import (
+    QWidget, QVBoxLayout, QComboBox, QSplitter, QTextEdit, QHBoxLayout, QCheckBox,
+    QMessageBox, QLabel, QPushButton, QInputDialog, QLineEdit
+)
 
 from app.api.llm_api import GetModelListWorker
 from app.api.speech_api import TranscribeWorker, MicVADWorker, MicRecorderWorker, GenerateAudioWorker
 from app.core.settings_manager import SettingsManager
 from app.data.colors import UIColors
-from app.data.app_data import storage
 from app.ui.widgets.chat_text_input_widget import ChatTextInputWidget
 from app.ui.widgets.chat_view_widget import ChatViewWidget
+
+# >>> conversations
+from app.core.conversation_manager import ConversationManager
+from app.ui.widgets.conversation_panel import ConversationPanel
 
 
 class ChatTab(QWidget):
@@ -18,7 +28,7 @@ class ChatTab(QWidget):
         self._stt_workers_pool = []
         self._last_spoken_text = ""
         self._tts_worker = None
-        #app_data.set("messages", [])
+
         self.settings = SettingsManager(self)
         self._remote_models: dict[str, list[str]] = {}
         self._remote_models_worker_started = False
@@ -31,25 +41,67 @@ class ChatTab(QWidget):
         self._vad_block_timer.setInterval(120)
         self._vad_block_timer.timeout.connect(self._update_block)
 
+        # >>> conversations: init manager + password dialog
+        self.convman = ConversationManager(data_dir=os.path.expanduser("~/.aliceui"))
+        try:
+            if not self.convman.has_password():
+                pwd, ok = QInputDialog.getText(
+                    self,
+                    "Set Master Password",
+                    "Create a master password:",
+                    QLineEdit.EchoMode.Password
+                )
+                if not ok or not pwd:
+                    raise RuntimeError("Master password required to proceed.")
+                self.convman.set_master_password(pwd)
+            else:
+                pwd, ok = QInputDialog.getText(
+                    self,
+                    "Unlock Conversations",
+                    "Enter master password:",
+                    QLineEdit.EchoMode.Password
+                )
+                if not ok or not pwd:
+                    raise RuntimeError("Master password required to proceed.")
+                self.convman.set_master_password(pwd)
+        except Exception as e:
+            QMessageBox.critical(self, "Encryption", f"Failed to unlock storage:\n{e}")
+            raise
 
+        # >>> conversations: load latest or create
+        meta, payload = self.convman.load_or_create_latest()
+        self._current_conv_id = meta.id
+
+        # =======================
+        # UI LAYOUT
+        # =======================
         main_layout = QVBoxLayout()
         self.setLayout(main_layout)
 
         # --  Model selection and options  --
-        options_layout=QHBoxLayout()
+        options_layout = QHBoxLayout()
         self.model_selection = QComboBox()
-        self.TTS_toggle =QCheckBox("Text To Speech")
-        main_layout.addWidget(self.model_selection)
-        main_layout.addWidget(self.TTS_toggle)
+        self.TTS_toggle = QCheckBox("Text To Speech")
+        main_layout.addLayout(options_layout)
         options_layout.addWidget(self.model_selection)
         options_layout.addWidget(self.TTS_toggle)
-        main_layout.addLayout(options_layout)
 
+        # --- Horizontal splitter: LEFT = conversation panel, RIGHT = your existing vertical stack
+        hr = QSplitter(Qt.Orientation.Horizontal)
+        main_layout.addWidget(hr)
+
+        # LEFT: collapsible conversation panel
+        self.conv_panel = ConversationPanel()
+        hr.addWidget(self.conv_panel)
+        hr.setCollapsible(0, True)
+        hr.setStretchFactor(0, 0)
+
+        # RIGHT: vertical splitter (system prompt, chat view, input)
         splitter = QSplitter(Qt.Orientation.Vertical)
+        hr.addWidget(splitter)
+        hr.setStretchFactor(1, 1)
 
-        main_layout.addWidget(splitter)
         # --  System prompt  --
-
         self.system_prompt = QTextEdit()
         self.system_prompt.setPlaceholderText("System Prompt")
         self.system_prompt.setStyleSheet(f"""
@@ -87,9 +139,8 @@ class ChatTab(QWidget):
         stt_row.addStretch(1)
         stt_row.addWidget(self.ptt_btn)
 
-        main_layout.insertLayout(main_layout.count() - 1,
-                                 stt_row)  # insert above the splitter if you're using main_layout
-        # If you're using the splitter, you can also add a small container widget into the splitter above input.
+        # Insert speech row above the splitter (keeps your original layout intent)
+        main_layout.insertLayout(1, stt_row)
 
         # --   Input  ---
         self.input_field = ChatTextInputWidget()
@@ -101,18 +152,8 @@ class ChatTab(QWidget):
             border-color: {UIColors.highlight_color};
             border-radius: 10px;
             background: {UIColors.input_field_color}}}""")
-
-        self._apply_audio_chip_settings_from_qsettings()
-        # Show/hide chip on toggle
-        self.TTS_toggle.toggled.connect(self._on_tts_toggled)
-        # Bubble speak requests (Regenerate) bubble up here
-        self.chat_view.speak_requested.connect(self._speak_text)
-        # start with current toggle state
-        self._on_tts_toggled(self.TTS_toggle.isChecked())
         splitter.addWidget(self.input_field)
-
         splitter.setSizes([40, 3000, 40])
-
 
         # --  connections  --
         self.chat_view.audio_chip.playing_changed.connect(self._on_tts_playing_changed)
@@ -126,15 +167,152 @@ class ChatTab(QWidget):
         self.stt_mode.currentIndexChanged.connect(self._on_stt_mode_changed)
         self.ptt_btn.toggled.connect(self._on_ptt_toggled)
 
+        # TTS toggle & audio chip setup
+        self._apply_audio_chip_settings_from_qsettings()
+        self.TTS_toggle.toggled.connect(self._on_tts_toggled)
+        self.chat_view.speak_requested.connect(self._speak_text)
+        self._on_tts_toggled(self.TTS_toggle.isChecked())
+
+        # >>> conversations: hydrate UI with loaded payload
+        self._hydrate_from_payload(payload)
+        self._refresh_conv_panel(select_id=self._current_conv_id)
+
+        self.conv_panel.selected_changed.connect(self._on_conv_selected)
+        self.conv_panel.new_requested.connect(self._on_new_conv)
+        self.conv_panel.rename_requested.connect(self._on_rename_conv)
+        self.conv_panel.delete_requested.connect(self._on_delete_conv)
+        # Save system prompt when it loses focus
+        self.system_prompt.focusOutEvent = self._wrap_focus_out(self.system_prompt.focusOutEvent)
+
+    # -------------------------
+    # Conversations: helpers
+    # -------------------------
+    def _wrap_focus_out(self, orig):
+        def _handler(ev):
+            try:
+                self.convman.set_system(self._current_conv_id, self.system_prompt.toPlainText())
+            except Exception as e:
+                print("[ChatTab] Failed to save system:", e)
+            return orig(ev)
+        return _handler
+
+    def _hydrate_from_payload(self, payload: dict):
+        msgs = payload.get("messages", []) or []
+        self.system_prompt.setPlainText(payload.get("system", ""))
+
+        # Ordered batch: pre-create slots, then queue each message into its slot
+        self.chat_view.begin_ordered_batch(len(msgs))
+        for i, m in enumerate(msgs):
+            self.chat_view.add_message_ordered(
+                m.get("content", ""),
+                is_user=(m.get("role") == "user"),
+                index=i
+            )
+        self.chat_view.end_ordered_batch()
+
+    def _clear_chat_view_messages(self):
+        # Kill any queued bubble-adds
+        try:
+            self.chat_view.pending_bubbles.clear()
+        except Exception:
+            pass
+        layout = self.chat_view.chat_layout
+        # Remove everything
+        for i in reversed(range(layout.count())):
+            item = layout.itemAt(i)
+            if item and item.widget():
+                w = item.widget()
+                layout.removeWidget(w)
+                w.deleteLater()
+            else:
+                layout.removeItem(item)
+        # Re-add stretch
+        layout.addStretch()
+
+    def _refresh_conv_panel(self, select_id: str | None):
+        try:
+            metas = self.convman.list()
+            self.conv_panel.populate(metas, select_id)
+        except Exception as e:
+            print("[ChatTab] panel refresh failed:", e)
+
+    @Slot(str)
+    def _on_conv_selected(self, conv_id: str):
+        # Always (re)load, even if it's already the current id
+        if not conv_id:
+            return
+        try:
+            payload = self.convman.load(conv_id)
+            self._current_conv_id = conv_id
+        except Exception as e:
+            QMessageBox.critical(self, "Conversation", f"Failed to load conversation:\n{e}")
+            return
+        self._hydrate_from_payload(payload)
+
+    @Slot()
+    def _on_new_conv(self):
+        try:
+            current = self.convman.load(self._current_conv_id)
+            is_new = len([m for m in current.get("messages", []) if m.get("role") in ("user", "assistant")]) == 0
+            if is_new:
+                self.convman.replace_messages(self._current_conv_id, [])
+                self.system_prompt.clear()
+                self._hydrate_from_payload({"system": "", "messages": []})
+                return
+
+            meta = self.convman.create("New conversation")
+            self._current_conv_id = meta.id
+
+            # Update the sidebar list (no implicit selection callback)
+            self._refresh_conv_panel(select_id=meta.id)
+
+            # Hydrate the empty convo exactly once
+            payload = {"system": "", "messages": []}
+            self._hydrate_from_payload(payload)
+        except Exception as e:
+            QMessageBox.critical(self, "Conversation", f"Could not create new conversation:\n{e}")
+
+    @Slot(str)
+    def _on_rename_conv(self, conv_id: str):
+        title, ok = QInputDialog.getText(self, "Rename", "Title:")
+        if not ok or not title.strip():
+            return
+        try:
+            self.convman.rename(conv_id, title.strip())
+            self._refresh_conv_panel(select_id=conv_id)
+        except Exception as e:
+            QMessageBox.critical(self, "Conversation", f"Rename failed:\n{e}")
+
+    @Slot(str)
+    def _on_delete_conv(self, conv_id: str):
+        if QMessageBox.question(self, "Delete", "Delete this conversation? This cannot be undone.") != QMessageBox.Yes:
+            return
+        try:
+            self.convman.delete(conv_id)
+            metas = self.convman.list()
+            if metas:
+                self._current_conv_id = metas[0].id
+                payload = self.convman.load(self._current_conv_id)
+                self._hydrate_from_payload(payload)
+                self._refresh_conv_panel(select_id=self._current_conv_id)
+            else:
+                meta = self.convman.create("New conversation")
+                self._current_conv_id = meta.id
+                self._hydrate_from_payload({"system": "", "messages": []})
+                self._refresh_conv_panel(select_id=meta.id)
+        except Exception as e:
+            QMessageBox.critical(self, "Conversation", f"Delete failed:\n{e}")
+
+    # -------------------------
+    # Existing functionality
+    # -------------------------
     def _update_block(self):
-        # Snapshot the ref to avoid race with other threads changing it mid-call
         worker = self._stt_vad_worker
         if worker is None:
             if self._vad_block_timer.isActive():
                 self._vad_block_timer.stop()
             return
 
-        # Guard audio chip (during early init)
         playing = False
         try:
             chip = getattr(self.chat_view, "audio_chip", None)
@@ -146,7 +324,6 @@ class ChatTab(QWidget):
         try:
             worker.set_blocked(blocked)
         except Exception:
-            # Worker likely finishing; stop timer and bail
             if self._vad_block_timer.isActive():
                 self._vad_block_timer.stop()
 
@@ -158,17 +335,26 @@ class ChatTab(QWidget):
 
         # === Build messages with latest system prompt ===
         system_text = self.system_prompt.toPlainText()
-        history = storage.get("messages", []) or []
-        # Remove any previous system messages from history
-        history_wo_system = [m for m in history if m.get("role") != "system"]
+        try:
+            self.convman.set_system(self._current_conv_id, system_text)
+            payload = self.convman.load(self._current_conv_id)
+            history = [m for m in payload.get("messages", []) if m.get("role") != "system"]
+        except Exception as e:
+            QMessageBox.critical(self, "Conversation", f"Failed to read conversation: {e}")
+            history = []
 
         # New conversation structure: system prompt first, then history, then the new user message
-        messages = [{"role": "system", "content": system_text}] + history_wo_system
+        messages = [{"role": "system", "content": system_text}] + history
         messages.append({"role": "user", "content": message})
 
-        # Show the user's message immediately
+        # Persist user's message immediately
+        try:
+            self.convman.append_message(self._current_conv_id, "user", message)
+            #self._refresh_conv_panel(select_id=self._current_conv_id)
+        except Exception as e:
+            print("[ChatTab] warn: could not persist user msg:", e)
 
-        # === Route by provider type ===
+        # Show the user's message immediately
         self.chat_view.add_message(message, True)
         self.input_field.setEnabled(False)
 
@@ -214,9 +400,11 @@ class ChatTab(QWidget):
 
     def got_llm_response(self, result: str):
         """Handle a completed LLM call (local or remote)."""
-        history = storage.get("messages", []) or []
-        history.append({"role": "assistant", "content": result})
-        storage.set("messages", history)
+        try:
+            self.convman.append_message(self._current_conv_id, "assistant", result)
+            #self._refresh_conv_panel(select_id=self._current_conv_id)
+        except Exception as e:
+            print("[ChatTab] warn: could not persist assistant msg:", e)
 
         self.chat_view.add_message(result, False)
         self.input_field.setEnabled(True)
@@ -241,7 +429,7 @@ class ChatTab(QWidget):
 
         # Local (Ollama)
         add_section("Local (Ollama)")
-        for m in self._ollama_models:
+        for m in getattr(self, "_ollama_models", []):
             self.model_selection.addItem(f"Ollama • {m}", {"source": "ollama", "model": m})
 
         # Remote providers (manual + auto-fetched union)
@@ -263,11 +451,9 @@ class ChatTab(QWidget):
             pid = (p.get("id") or "").lower()
             add_section(label)
 
-            # union: models saved manually in Auth tab + auto-fetched for that key
             manual = p.get("models") or []
             auto = self._remote_models.get(pid, []) or []
 
-            # Prefer unique order: manual first, then any new auto
             seen = set()
             merged = []
             for m in manual + auto:
@@ -276,7 +462,6 @@ class ChatTab(QWidget):
                     merged.append(m)
 
             if not merged:
-                # Optional nice UX
                 self.model_selection.addItem("(no models found)", None)
                 self.model_selection.model().item(self.model_selection.count() - 1).setEnabled(False)
             else:
@@ -428,7 +613,6 @@ class ChatTab(QWidget):
         if mode == "Natural":
             self._start_vad()
 
-
     def _on_ptt_toggled(self, pressed: bool):
         if self.stt_mode.currentText() != "Push to talk":
             self.ptt_btn.setChecked(False)
@@ -438,7 +622,6 @@ class ChatTab(QWidget):
             self.ptt_btn.setText("⏺️ Recording…")
         else:
             self._stop_push_record()
-
 
     def _start_push_record(self):
         self._stt_push_worker = MicRecorderWorker(sr=16000, channels=1, parent=self)
@@ -473,7 +656,6 @@ class ChatTab(QWidget):
         # compute trigger
         rms_thresh = max(min_floor, noise_floor * mult) if auto else manual_thresh
 
-        from app.api.speech_api import MicVADWorker
         self._stt_vad_worker = MicVADWorker(
             sr=16000,
             channels=1,

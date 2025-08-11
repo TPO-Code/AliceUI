@@ -7,3 +7,4 @@ platformdirs
 markdown
 pygments
 pymdown-extensions
+cryptography
