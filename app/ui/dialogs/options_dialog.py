@@ -296,6 +296,7 @@ class AuthTabWidget(QWidget):
     def _on_fetch_models_err(self, err: str):
         self.fetch_models_btn.setEnabled(True)
         QMessageBox.warning(self, "Fetch failed", f"Could not fetch models:\n\n{err}")
+
 class GetVoiceListWorker(QThread):
     complete = Signal(list,bool)
 
@@ -341,7 +342,6 @@ class GenerateAudioWorker(QThread):
             self.complete.emit(f"Network error: {e}", False)
         except Exception as e:
             self.complete.emit(f"An error occurred: {e}", False)
-
 
 
 class OptionsDialog(QDialog):
@@ -401,6 +401,15 @@ class OptionsDialog(QDialog):
         speech_tab_layout.addWidget(QLabel("Voice Server endpoint"))
         self.voice_server_url = QLineEdit("http://127.0.0.1:8008")
         speech_tab_layout.addWidget(self.voice_server_url)
+
+        speech_tab_layout.addWidget(QLabel("STT Server endpoint"))
+        self.stt_server_url = QLineEdit()
+        self.stt_server_url.setText(self._get("speech/stt_server_url", self.voice_server_url.text(), str))
+        speech_tab_layout.addWidget(self.stt_server_url)
+
+        self.stt_server_url.editingFinished.connect(
+            lambda: self._save("speech/stt_server_url", self.stt_server_url.text())
+        )
 
         voice_row = QHBoxLayout()
         speech_tab_layout.addWidget(QLabel("Voice"))
@@ -648,6 +657,10 @@ class OptionsDialog(QDialog):
         url = self._get("speech/voice_server_url", "http://127.0.0.1:8008", str)
         self.voice_server_url.setText(url)
 
+        stt_url = self._get("speech/stt_server_url", url, str)  # default to the TTS url if unset
+        if hasattr(self, "stt_server_url"):
+            self.stt_server_url.setText(stt_url)
+
         # Colors
         self._vis_fg = self._get("speech/vis_fg", "#8be9fd", str)
         self._vis_bg = self._get("speech/vis_bg", "#1e1f29", str)
@@ -688,6 +701,9 @@ class OptionsDialog(QDialog):
         self._save("speech/test_text", self.tts_test_text.toPlainText())
         if self.voice_selection.currentIndex() >= 0:
             self._save("speech/voice", self.voice_selection.currentText())
+
+        if hasattr(self, "stt_server_url"):
+            self._save("speech/stt_server_url", self.stt_server_url.text())
 
         if self._vis_fg: self._save("speech/vis_fg", self._vis_fg)
         if self._vis_bg: self._save("speech/vis_bg", self._vis_bg)

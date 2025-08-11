@@ -344,6 +344,10 @@ class AudioWaveWidget(QWidget):
             if not self._timer.isActive():
                 self._timer.start()
 
+    def is_playing(self) -> bool:
+        """Public helper so other widgets can see if we're currently playing."""
+        return (self._audio is not None) and (not self._paused)
+
     # ---- internals ----
     def _start_fresh(self):
         # build sink & buffer

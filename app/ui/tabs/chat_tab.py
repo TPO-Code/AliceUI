@@ -1,7 +1,9 @@
-from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QWidget, QVBoxLayout, QComboBox, QSplitter, QTextEdit, QHBoxLayout, QCheckBox, QMessageBox
+from PySide6.QtCore import Qt, Slot, QTimer
+from PySide6.QtWidgets import QWidget, QVBoxLayout, QComboBox, QSplitter, QTextEdit, QHBoxLayout, QCheckBox, \
+    QMessageBox, QLabel, QPushButton
 
 from app.api.llm_api import GetModelListWorker
+from app.api.speech_api import TranscribeWorker, MicVADWorker, MicRecorderWorker
 from app.core.settings_manager import SettingsManager
 from app.data.colors import UIColors
 from app.data.app_data import app_data
@@ -19,6 +21,16 @@ class ChatTab(QWidget):
         self.settings = SettingsManager(self)
         self._remote_models: dict[str, list[str]] = {}
         self._remote_models_worker_started = False
+
+        self._inference_active = False
+        self._stt_vad_worker = None
+        self._stt_push_worker = None
+        self._stt_transcribe_worker = None
+        self._vad_block_timer = QTimer(self)
+        self._vad_block_timer.setInterval(120)
+        self._vad_block_timer.timeout.connect(self._update_block)
+
+
         main_layout = QVBoxLayout()
         self.setLayout(main_layout)
 
@@ -63,6 +75,21 @@ class ChatTab(QWidget):
                                      )
         splitter.addWidget(self.chat_view)
 
+        stt_row = QHBoxLayout()
+        self.stt_mode = QComboBox()
+        self.stt_mode.addItems(["Off", "Push to talk", "Natural"])
+        self.ptt_btn = QPushButton("🎙️ Talk")
+        self.ptt_btn.setCheckable(True)
+        self.ptt_btn.setEnabled(False)  # enabled only when mode != Off
+        stt_row.addWidget(QLabel("Speech input:"))
+        stt_row.addWidget(self.stt_mode)
+        stt_row.addStretch(1)
+        stt_row.addWidget(self.ptt_btn)
+
+        main_layout.insertLayout(main_layout.count() - 1,
+                                 stt_row)  # insert above the splitter if you're using main_layout
+        # If you're using the splitter, you can also add a small container widget into the splitter above input.
+
         # --   Input  ---
         self.input_field = ChatTextInputWidget()
         self.input_field.setStyleSheet(f"""
@@ -93,6 +120,32 @@ class ChatTab(QWidget):
         self.get_model_list_worker.completed_llm_call.connect(self.got_model_list)
 
         self.settings.providers_changed.connect(lambda _: self._rebuild_model_selection())
+        self.stt_mode.currentIndexChanged.connect(self._on_stt_mode_changed)
+        self.ptt_btn.toggled.connect(self._on_ptt_toggled)
+
+    def _update_block(self):
+        # Snapshot the ref to avoid race with other threads changing it mid-call
+        worker = self._stt_vad_worker
+        if worker is None:
+            if self._vad_block_timer.isActive():
+                self._vad_block_timer.stop()
+            return
+
+        # Guard audio chip (during early init)
+        playing = False
+        try:
+            chip = getattr(self.chat_view, "audio_chip", None)
+            playing = bool(chip and chip.is_playing())
+        except Exception:
+            playing = False
+
+        blocked = self._inference_active or playing
+        try:
+            worker.set_blocked(blocked)
+        except Exception:
+            # Worker likely finishing; stop timer and bail
+            if self._vad_block_timer.isActive():
+                self._vad_block_timer.stop()
 
     def send_message(self, message: str):
         data = self.model_selection.currentData()
@@ -111,10 +164,14 @@ class ChatTab(QWidget):
         messages.append({"role": "user", "content": message})
 
         # Show the user's message immediately
+
+        # === Route by provider type ===
         self.chat_view.add_message(message, True)
         self.input_field.setEnabled(False)
 
-        # === Route by provider type ===
+        # Pause VAD during inference (both local and remote)
+        self._inference_active = True
+
         if data.get("source") == "ollama":
             from app.api.llm_api import SendMessageWorker
             selected_model = data.get("model") or self.model_selection.currentText()
@@ -133,7 +190,7 @@ class ChatTab(QWidget):
                 QMessageBox.warning(self, "Missing provider", "Provider settings not found.")
                 self.input_field.setEnabled(True)
                 return
-
+            self._inference_active = True
             self.remote_worker = SendRemoteMessageWorker(
                 messages=messages,
                 provider_id=data["provider_id"],
@@ -149,6 +206,7 @@ class ChatTab(QWidget):
     def _on_llm_error(self, err: str):
         self.chat_view.add_message(f"[Error]\n{err}", False)
         self.input_field.setEnabled(True)
+        self._inference_active = False
 
     def got_llm_response(self, result: str):
         """Handle a completed LLM call (local or remote)."""
@@ -160,6 +218,7 @@ class ChatTab(QWidget):
         self.input_field.setEnabled(True)
         if self.TTS_toggle.isChecked():
             self._speak_text(result)
+        self._inference_active = False
 
     def got_model_list(self, models: list):
         # Save Ollama models and rebuild full selector (local + remote)
@@ -239,7 +298,8 @@ class ChatTab(QWidget):
 
     def _on_tts_toggled(self, enabled: bool):
         self.chat_view.set_tts_enabled(bool(enabled))
-        self.TTS_toggle.toggled.connect(lambda _: self._apply_audio_chip_settings_from_qsettings())
+        # Re-apply current chip params once when the toggle changes
+        self._apply_audio_chip_settings_from_qsettings()
 
     def _apply_audio_chip_settings_from_qsettings(self):
         """Read visualizer settings from QSettings and apply to the chat audio chip."""
@@ -331,3 +391,110 @@ class ChatTab(QWidget):
     def _on_tts_complete(self, message: str, success: bool):
         if not success:
             self.chat_view.audio_chip.stop(hard=True)
+
+    def _on_stt_mode_changed(self, idx: int):
+        mode = self.stt_mode.currentText()
+        self.ptt_btn.setEnabled(mode == "Push to talk")
+
+        # Stop push worker
+        if self._stt_push_worker:
+            try:
+                self._stt_push_worker.stop_recording()
+            except Exception:
+                pass
+            self._stt_push_worker = None
+
+        # Stop VAD worker (stop -> wait -> None)
+        if self._stt_vad_worker:
+            try:
+                self._stt_vad_worker.stop_vad()
+            except Exception:
+                pass
+            try:
+                self._stt_vad_worker.wait(1000)
+            except Exception:
+                pass
+            self._stt_vad_worker = None
+
+        if self._vad_block_timer.isActive():
+            self._vad_block_timer.stop()
+
+        if mode == "Natural":
+            self._start_vad()
+
+
+    def _on_ptt_toggled(self, pressed: bool):
+        if self.stt_mode.currentText() != "Push to talk":
+            self.ptt_btn.setChecked(False)
+            return
+        if pressed:
+            self._start_push_record()
+            self.ptt_btn.setText("⏺️ Recording…")
+        else:
+            self._stop_push_record()
+
+
+    def _start_push_record(self):
+        self._stt_push_worker = MicRecorderWorker(sr=16000, channels=1, parent=self)
+        self._stt_push_worker.recorded.connect(self._transcribe_wav)
+        self._stt_push_worker.error.connect(lambda e: (print("[PTT] error:", e), self.ptt_btn.setChecked(False)))
+        self._stt_push_worker.start()
+
+
+    def _stop_push_record(self):
+        if self._stt_push_worker:
+            self._stt_push_worker.stop_recording()
+            self._stt_push_worker = None
+        self.ptt_btn.setText("🎙️ Talk")
+
+    def _start_vad(self):
+        if self._stt_vad_worker is not None:
+            return
+        self._stt_vad_worker = MicVADWorker(
+            sr=16000, channels=1,
+            rms_thresh=0.03, min_active_ms=220, silence_ms=500,
+            parent=self
+        )
+        self._stt_vad_worker.segment.connect(self._transcribe_wav)
+        self._stt_vad_worker.error.connect(lambda e: print("[VAD] error:", e))
+        self._stt_vad_worker.finished.connect(self._on_vad_finished)
+
+        self._stt_vad_worker.start()
+
+        # Kick the first block update and start polling
+        self._update_block()
+        if not self._vad_block_timer.isActive():
+            self._vad_block_timer.start()
+
+    def _on_vad_finished(self):
+        self._stt_vad_worker = None
+        if self._vad_block_timer.isActive():
+            self._vad_block_timer.stop()
+
+    def _transcribe_wav(self, wav_bytes: bytes):
+        sm = SettingsManager(self)
+        base = sm.value("speech/stt_server_url", sm.value("speech/voice_server_url", "http://127.0.0.1:8008"))
+        device = "cuda"  # or load a user setting if you add one
+        self._stt_transcribe_worker = TranscribeWorker(base, wav_bytes, device=device)
+        self._stt_transcribe_worker.finished.connect(self._on_stt_text)
+        self._stt_transcribe_worker.start()
+
+
+    @Slot(str, bool)
+    def _on_stt_text(self, text: str, ok: bool):
+        if not ok:
+            print("[STT] transcription error:", text)
+            return
+        # Stuff the transcribed text into the input field and (optionally) auto-send
+        # Here we'll just insert it; user can edit then hit send.
+        cur = self.input_field.toPlainText() if hasattr(self.input_field, "toPlainText") else ""
+        new_text = (cur + (" " if cur else "") + text).strip()
+        try:
+            self.input_field.setPlainText(new_text)
+            self.input_field.setFocus()
+            # If you prefer auto-send on natural mode, uncomment:
+            # if self.stt_mode.currentText() == "Natural":
+            #     self.input_field.send_message.emit(new_text)
+            #     self.input_field.setPlainText("")
+        except Exception:
+            pass
