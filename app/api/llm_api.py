@@ -49,11 +49,11 @@ def query_ollama(messages, model: str, options=None):
         "stream": False,
         "options": options
     }
-
+    print(json.dumps(payload, indent=4))
     response = requests.post(
         storage.get("settings.ollama.url", "http://localhost:11434") + "/api/chat",
         json=payload,
-        timeout=60
+        timeout=600
     )
     response.raise_for_status()
     print("ollama responded")

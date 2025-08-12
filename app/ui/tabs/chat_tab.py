@@ -263,12 +263,12 @@ class ChatTab(QWidget):
             meta = self.convman.create("New conversation")
             self._current_conv_id = meta.id
 
-            # Update the sidebar list (no implicit selection callback)
+            # Update the sidebar; ConversationPanel.populate will emit ONE selection for meta.id
             self._refresh_conv_panel(select_id=meta.id)
 
-            # Hydrate the empty convo exactly once
-            payload = {"system": "", "messages": []}
-            self._hydrate_from_payload(payload)
+            # ❌ remove this; selection signal will load it
+            # payload = {"system": "", "messages": []}
+            # self._hydrate_from_payload(payload)
         except Exception as e:
             QMessageBox.critical(self, "Conversation", f"Could not create new conversation:\n{e}")
 

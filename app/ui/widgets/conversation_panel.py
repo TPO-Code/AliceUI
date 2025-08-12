@@ -48,20 +48,28 @@ class ConversationPanel(QWidget):
 
     # ------- API -------
     def populate(self, metas: list[ConversationMeta], current_id: str | None):
-        self.list.clear()
-        self._items_by_id.clear()
-        for m in metas:
-            txt = f"{m.title}"
-            if m.is_new:
-                txt += "  (new)"
-            it = QListWidgetItem(txt)
-            it.setData(Qt.UserRole, m.id)
-            self.list.addItem(it)
-            self._items_by_id[m.id] = it
-        if current_id and current_id in self._items_by_id:
-            self.list.setCurrentItem(self._items_by_id[current_id])
-        elif self.list.count():
-            self.list.setCurrentRow(0)
+        self.list.blockSignals(True)
+        try:
+            self.list.clear()
+            self._items_by_id.clear()
+
+            for m in metas:
+                txt = f"{m.title}{'  (new)' if m.is_new else ''}"
+                it = QListWidgetItem(txt)
+                it.setData(Qt.UserRole, m.id)
+                self.list.addItem(it)
+                self._items_by_id[m.id] = it
+
+            # Choose selection deterministically
+            if current_id and current_id in self._items_by_id:
+                self.list.setCurrentItem(self._items_by_id[current_id])
+            elif self.list.count():
+                self.list.setCurrentRow(0)
+        finally:
+            self.list.blockSignals(False)
+
+        # Emit one clean selection event *after* selection has been set
+        self._emit_selection()
 
     def current_id(self) -> str | None:
         it = self.list.currentItem()

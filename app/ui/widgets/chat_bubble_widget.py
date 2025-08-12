@@ -440,11 +440,11 @@ class BubbleMarkdownViewerWidget(QWidget):
         <html>
         <head>
             <meta charset="UTF-8">
-            <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
-            <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
-            <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
+            <link rel="stylesheet" href="qrc:/ui/assets/katex/katex.min.css">
+            <script defer src="qrc:/ui/assets/katex/katex.min.js"></script>
+            <script defer src="qrc:/ui/assets/katex/auto-render.min.js"></script>
             <script type="text/javascript" src="qrc:///qtwebchannel/qwebchannel.js"></script>
-            <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+            <script src="qrc:/ui/assets/mermaid/mermaid.min.js"></script>
             <style>
                 {self.styling_css} {self.code_block_css}
                 {self.code_theme_css} {self.admonition_css}

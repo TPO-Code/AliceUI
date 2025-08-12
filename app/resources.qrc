@@ -1,0 +1,8 @@
+<!DOCTYPE RCC><RCC version="1.0">
+  <qresource prefix="/">
+    <file>ui/assets/katex/katex.min.css</file>
+    <file>ui/assets/katex/katex.min.js</file>
+    <file>ui/assets/katex/auto-render.min.js</file>
+    <file>ui/assets/mermaid/mermaid.min.js</file>
+  </qresource>
+</RCC>
